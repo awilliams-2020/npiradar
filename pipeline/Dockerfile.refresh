@@ -1,0 +1,11 @@
+# npiradar-refresh — runner for the monthly NPPES auto-refresh (triggered via cron-job.org).
+# The source tree + node_modules (tsx/pg/csv-parse) are bind-mounted at /app by compose, so this
+# image only layers in the system tools the pipeline shells out to (curl/unzip/xxd for fetch-monthly).
+FROM node:20-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash ca-certificates curl unzip xxd && \
+    rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+ENV NODE_ENV=production PORT=8080
+EXPOSE 8080
+CMD ["npx", "tsx", "pipeline/refresh-server.ts"]

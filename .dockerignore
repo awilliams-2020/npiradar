@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+pipeline
+.git
+.gitignore
+*.log
+.env
+.env.local
+README.md
+ARCHITECTURE.md
+IMPLEMENTATION.md
