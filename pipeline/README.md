@@ -25,7 +25,7 @@ npm install                       # csv-parse, pg, pg-copy-streams, tsx
 docker exec postgres psql -U postgres -c "CREATE DATABASE npiradar;"
 ```
 
-`DATABASE_URL` defaults to `postgresql://postgres:password@localhost:5433/npiradar` (the host-published port of the
+`DATABASE_URL` defaults to `postgresql://postgres:<password>@localhost:5433/npiradar` (the host-published port of the
 shared container). Override via env if needed. **Don't** point the host pipeline at `postgres:5432` — that name only
 resolves inside the `db` Docker network.
 

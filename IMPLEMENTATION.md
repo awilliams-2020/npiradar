@@ -124,11 +124,11 @@ export function isValidNpi(npi: string): boolean {
 ## Infrastructure (use the shared stack — not a throwaway container)
 
 The home server already runs a shared **`postgres`** container (TimescaleDB pg15) on the external **`db`** network,
-host port **5433**, creds `postgres:password`. Each project gets its own database (cf. `confession_board`, `theqrcode`).
+host port **5433**, creds `postgres:<password>`. Each project gets its own database (cf. `confession_board`, `theqrcode`).
 
-- Spike DB created: `npiradar`. Pipeline (host-run) → `postgresql://postgres:password@localhost:5433/npiradar`.
+- Spike DB created: `npiradar`. Pipeline (host-run) → `postgresql://postgres:<password>@localhost:5433/npiradar`.
 - The Phase 1 web app's compose+env live in **`~/projects/npiradar/`** (split layout), joining the `db` + `traefik`
-  external networks like `confession-board`; in-network DSN is `postgresql://postgres:password@postgres:5432/npiradar`.
+  external networks like `confession-board`; in-network DSN is `postgresql://postgres:<password>@postgres:5432/npiradar`.
 
 ## First commands (Phase 0 kickoff)
 

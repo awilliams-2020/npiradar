@@ -16,7 +16,7 @@ A point-in-time picture of what is **actually built, loaded, and serving** — d
 | **App container** `npiradar` | Up — Next.js 15.5.18 `output: standalone`, listening on `:3000`, on the `traefik` + `db` networks. |
 | **Routing** | Traefik routes `Host(npiradar.com) \|\| Host(www.npiradar.com)` → container. |
 | **TLS** | **Live Let's Encrypt cert (2026-05-24)** — `certresolver=default` (HTTP-01), SAN `npiradar.com` + `www.npiradar.com`, valid to 2026-08-22. HTTP→HTTPS 301. (Note: combined cert fails atomically if any SAN's DNS is missing — `www` must resolve before issuance.) |
-| **Database** | Shared `postgres` container (TimescaleDB pg15), host port **5433**, db **`npiradar`**, creds `postgres:password`. App reaches it in-network at `postgres:5432`; host-run pipeline uses `localhost:5433`. |
+| **Database** | Shared `postgres` container (TimescaleDB pg15), host port **5433**, db **`npiradar`**, creds `postgres:<password>`. App reaches it in-network at `postgres:5432`; host-run pipeline uses `localhost:5433`. |
 | **Deploy layout** | `~/projects/npiradar/` = `docker-compose.yml` + `.env`; `~/npiradar/` = source + `Dockerfile`. ([[deploy-convention-traefik-compose]]) |
 | **CDN** | **Not in front yet.** Cloudflare is planned to cache rendered HTML by URL; until the domain is live, ISR + the container's `.next/cache` is the only caching layer. |
 
