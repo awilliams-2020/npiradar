@@ -4,12 +4,23 @@ import { query } from "@/lib/db";
 // facet sitemaps. Reads the materialized views from pipeline/facets.sql + the providers indexes.
 
 export const PAGE_SIZE = 50; // providers listed per facet page
-export const INDEXABLE_MIN = 5; // a specialty×city page is indexed only at/above this provider count
+// Index-eligibility thresholds. Each drives BOTH the page's robots meta (below → `noindex, follow`) and
+// sitemap inclusion, so the two can never disagree. Set 2026-09-24 after GSC showed 1 of 156 ranking pages
+// indexed and 20/20 sampled sitemap URLs never discovered: a 307k-URL sitemap of thin templated pages was
+// being declined wholesale. Cut to ≈10.7k (see ~/scripts/seo/audits/npiradar.md); relax only once the
+// retained set indexes.
+export const INDEXABLE_MIN = 200; // a specialty×city page is indexed only at/above this provider count
+export const CITY_INDEXABLE_MIN = 250; // a city page is indexed only at/above this provider count
 export const MAX_INDEXED_PAGE = 10; // paginate beyond this → noindex (avoid deep-pagination index bloat)
 
 // Data version = the latest NPPES "last update" date. It only advances with the monthly load, so it
 // doubles as a sitemap Last-Modified / lastmod stamp. Cached per-instance for a day so the one uncached
 // max() over ~9M rows runs at most once per instance per day (sitemap conditional requests are cheap).
+// Floor for that stamp: the date the sitemap inclusion rules last changed. Without it a rules change (e.g.
+// the thresholds above) is invisible to Google — its If-Modified-Since still matches the data version, so
+// every sitemap answers 304 and the new, smaller set is never fetched. Bump whenever the rules change.
+const SITEMAP_RULES_VERSION = "2026-09-24";
+
 let dataVersionCache: { date: string; at: number } | null = null;
 export async function dataVersion(): Promise<string> {
   const DAY = 86_400_000;
@@ -23,6 +34,7 @@ export async function dataVersion(): Promise<string> {
   } catch {
     /* DB down → keep today's date; the routes themselves return 503 in that case anyway */
   }
+  if (date < SITEMAP_RULES_VERSION) date = SITEMAP_RULES_VERSION;
   dataVersionCache = { date, at: Date.now() };
   return date;
 }
@@ -227,7 +239,8 @@ export async function sitemapStates(): Promise<string[]> {
 
 export async function sitemapCities(): Promise<{ state: string; city_slug: string }[]> {
   return query<{ state: string; city_slug: string }>(
-    `SELECT state, city_slug FROM mv_city_counts ORDER BY state, city_slug`,
+    `SELECT state, city_slug FROM mv_city_counts WHERE n >= $1 ORDER BY state, city_slug`,
+    [CITY_INDEXABLE_MIN],
   );
 }
 

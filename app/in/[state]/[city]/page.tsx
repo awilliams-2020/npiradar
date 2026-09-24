@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
   getCity, providersByCity, specialtiesForCity, topCitiesInState,
-  PAGE_SIZE, MAX_INDEXED_PAGE,
+  PAGE_SIZE, MAX_INDEXED_PAGE, CITY_INDEXABLE_MIN,
 } from "@/lib/facets";
 import { cityStateSlug } from "@/lib/slug";
 import { titleCase } from "@/lib/format";
@@ -32,7 +32,9 @@ export async function generateMetadata({ params, searchParams }: { params: Param
       `${c.n.toLocaleString()} healthcare providers in ${label}, from doctors and dentists to clinics and ` +
       `pharmacies. Search the NPPES registry by NPI number, name, or specialty.`,
     alternates: { canonical: page > 1 ? `${base}?page=${page}` : base },
-    robots: page > MAX_INDEXED_PAGE ? { index: false, follow: true } : undefined,
+    // Thin cities (few providers — often NPPES address typos like "crystal-cty") and deep pagination
+    // stay reachable but out of the index; mirrors the specialty×city rule.
+    robots: c.n >= CITY_INDEXABLE_MIN && page <= MAX_INDEXED_PAGE ? undefined : { index: false, follow: true },
   };
 }
 

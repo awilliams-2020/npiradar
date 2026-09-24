@@ -47,7 +47,7 @@ Full **May 2026 monthly** NPPES file loaded (not the weekly slice). Counts as of
 NPPES carries ~1,000 foreign/junk `practice_state` values, excluded from geo facets); partial provider indexes
 `(practice_state, practice_city, primary_taxonomy_code)`, `last_name`, `org_name` (active rows, for facets + name
 search); and three materialized views — `mv_specialty_counts` (870), `mv_city_counts` (37,720), and
-`mv_specialty_city_counts` (1,073,972; 264,860 with ≥5 providers). Each MV has a UNIQUE index for
+`mv_specialty_city_counts` (1,083,981; 5,194 at the ≥200-provider index threshold). Each MV has a UNIQUE index for
 `REFRESH … CONCURRENTLY`.
 
 ## App routes (built)
@@ -70,7 +70,7 @@ search); and three materialized views — `mv_specialty_counts` (870), `mv_city_
 | `/_not-found` · `/robots.txt` | static | robots advertises `/sitemap.xml` |
 | `/sitemap.xml` | route handler | **index** (193 children): pages + specialties + cities + 6 money-page files + 184 provider files |
 | `/sitemaps/providers/[n].xml` | route handler | 50k active providers each (`/npi/{npi}` + per-record `lastmod`) |
-| `/sitemaps/specialties.xml` · `cities.xml` · `specialty-cities/[n].xml` · `pages.xml` | route handlers | facet + static URLs (money sitemap = pages with ≥5 providers only) |
+| `/sitemaps/specialties.xml` · `cities.xml` · `specialty-cities/[n].xml` · `pages.xml` | route handlers | facet + static URLs. Index thresholds (`lib/facets.ts`): specialty×city ≥200 providers, city ≥250; below → `noindex, follow` and out of the sitemap (cut 2026-09-24, ≈10.7k URLs total) |
 
 Root layout sets `metadataBase`, OG/Twitter defaults, header nav (Search · Specialties), and CMS attribution.
 

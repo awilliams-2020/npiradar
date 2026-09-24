@@ -5,6 +5,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — Index-eligibility cut: 307k → ≈10.7k submitted URLs (2026-09-24)
+
+**Why:** The 2026-09-24 search audit (`~/scripts/seo/audits/npiradar.md`) found 1 of 156 ranking pages
+indexed (3/210 on 07-27), and 20 of 20 sampled sitemap URLs never discovered. Googlebot has dropped to about 40
+requests a day. The tools pages and `/specialty` were still "URL is unknown to Google". Nearly half of all city
+pages (17,734 of 37,850) had fewer than 5 providers, many of them NPPES address typos (`/in/az/cullman`,
+`/in/mo/crystal-cty`). Google was declining the corpus as scaled thin content.
+
+**What changed:**
+- `INDEXABLE_MIN` 5 → **200** (specialty×city); new `CITY_INDEXABLE_MIN = 250` wired into the city page's
+  robots meta and `cities.xml`. Below threshold a page is `noindex, follow`: still crawlable, linked, and
+  unchanged for users.
+- `SITEMAP_RULES_VERSION` floor on `dataVersion()`. Without it the 304 short-circuit (below) would hide the
+  cut: Google's `If-Modified-Since` still matched the data version, so it would never re-fetch the smaller
+  sitemaps. Bump it whenever inclusion rules change.
+- New `/nppes` explainer and `/npi-api` docs page (in `pages.xml`, nav, home, `llms.txt`). Bulk-lookup is
+  refocused on bulk and points to `/npi-api` instead of carrying the full API docs.
+
 ### Added — Public API: bulk + search endpoints with first-class rate limiting (2026-07-13)
 
 **Why:** GSC surfaced real demand for programmatic access (e.g. *"ai tool that pulls bulk practice

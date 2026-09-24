@@ -1,7 +1,7 @@
 import { sitemapStates, sitemapCities, dataVersion } from "@/lib/facets";
 import { urlsetXml, xmlResponse, notModified, notModifiedResponse, type SitemapUrl } from "@/lib/sitemap";
 
-// ~40k city pages + the ~56 state index pages. Comfortably under the 50k-per-file cap.
+// City pages at/above CITY_INDEXABLE_MIN (~4.5k) + the ~59 state index pages.
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {

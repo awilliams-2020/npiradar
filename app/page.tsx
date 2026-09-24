@@ -3,6 +3,7 @@ import Link from "next/link";
 import { query } from "@/lib/db";
 import { topSpecialties, topCities } from "@/lib/facets";
 import { LinkChips, specialtyLinks, cityLinks } from "@/app/_components/facet";
+import { HomeStructuredData } from "@/app/_components/home-structured-data";
 
 // Render per-request (not prerendered at build, where the DB is unreachable) so the count reflects
 // the live registry after a deploy or monthly refresh.
@@ -88,14 +89,17 @@ export default async function Home() {
           The <strong>National Provider Identifier (NPI)</strong> is a unique 10-digit number assigned to every
           US healthcare provider, both individuals (a doctor, dentist, or nurse) and organizations (a clinic,
           hospital, or pharmacy). CMS issues it through the{" "}
-          <strong>National Plan &amp; Provider Enumeration System (NPPES)</strong>, and it appears on insurance
+          <Link href="/nppes"><strong>National Plan &amp; Provider Enumeration System (NPPES)</strong></Link>, and it appears on insurance
           claims and prescriptions. NPIRadar makes that public registry searchable: look up a provider by NPI
           number, browse <Link href="/specialty">providers by specialty</Link>, or find providers in your city.
+          Developers can use the free <Link href="/npi-api">NPI API</Link>.
         </p>
         <p className="sub">
           Example: <Link href="/npi/1275073215">/npi/1275073215</Link>
         </p>
       </section>
+
+      <HomeStructuredData />
     </>
   );
 }

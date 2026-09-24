@@ -30,6 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/specialty">Specialties</Link>
               <Link href="/tools/bulk-lookup">Bulk lookup</Link>
               <Link href="/tools/npi-validator">Validator</Link>
+              <Link href="/npi-api">API</Link>
             </nav>
           </div>
         </header>
