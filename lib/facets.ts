@@ -118,6 +118,57 @@ export async function providersBySpecialtyCity(
   );
 }
 
+// ---- public search API -------------------------------------------------------
+// Backs GET /api/search — the discovery half of the public API (the /api/npi endpoints only resolve
+// a known NPI). Composes optional filters onto the same indexes the facet pages use:
+//   name       → last_name/org_name prefix (text_pattern_ops partial indexes)
+//   specialty  → resolved slug → taxonomy codes → primary_taxonomy_code (btree)
+//   state+city → city slug → raw_cities → (practice_state, practice_city, …) partial index
+// The route enforces "at least one selective filter" and "city requires state" so this never degrades
+// into a full-table scan. Returns ProviderListItem rows (same shape the facet lists render).
+export interface ProviderSearchFilter {
+  name?: string;
+  specialtySlug?: string;
+  state?: string;
+  citySlug?: string;
+}
+
+export async function searchProvidersApi(
+  f: ProviderSearchFilter, limit: number, offset: number,
+): Promise<ProviderListItem[]> {
+  const where = ["p.deactivation_date IS NULL"];
+  const args: unknown[] = [];
+
+  if (f.specialtySlug) {
+    const codes = await specialtyCodes(f.specialtySlug);
+    if (codes.length === 0) return []; // unknown specialty slug → no rows (not a scan)
+    args.push(codes);
+    where.push(`p.primary_taxonomy_code = ANY($${args.length})`);
+  }
+  if (f.state) {
+    args.push(f.state.toUpperCase());
+    where.push(`p.practice_state = $${args.length}`);
+  }
+  if (f.citySlug && f.state) {
+    const city = await getCity(f.state.toUpperCase(), f.citySlug);
+    if (!city) return []; // unknown city slug for that state
+    args.push(city.raw_cities);
+    where.push(`p.practice_city = ANY($${args.length})`);
+  }
+  if (f.name) {
+    args.push(f.name.toUpperCase().replace(/[%_\\]/g, "\\$&") + "%");
+    where.push(`(p.last_name LIKE $${args.length} OR p.org_name LIKE $${args.length})`);
+  }
+
+  args.push(limit, offset);
+  return query<ProviderListItem>(
+    `SELECT ${LIST_COLS} FROM providers p LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
+      WHERE ${where.join(" AND ")}
+      ${LIST_ORDER} LIMIT $${args.length - 1} OFFSET $${args.length}`,
+    args,
+  );
+}
+
 // ---- sibling / index links (crawl graph) -------------------------------------
 export interface SlugCount { slug: string; name: string; n: number }
 export interface CityRef { state: string; city_slug: string; city_name: string; n: number }

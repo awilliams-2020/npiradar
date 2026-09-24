@@ -2,8 +2,8 @@
 const nextConfig = {
   // Standalone server for the Docker image (~/projects/npiradar compose).
   output: "standalone",
-  // pg is a server-only native-ish dep; keep it external to the server bundle.
-  serverExternalPackages: ["pg"],
+  // pg + ioredis are server-only deps; keep them external to the traced server bundle.
+  serverExternalPackages: ["pg", "ioredis"],
 };
 
 export default nextConfig;

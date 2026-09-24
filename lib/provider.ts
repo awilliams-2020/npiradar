@@ -52,6 +52,26 @@ export async function getProvider(npi: string): Promise<ProviderRow | null> {
   return rows[0] ?? null;
 }
 
+/** Batch sibling of getProvider — one round-trip for many NPIs (bulk API + bulk-lookup tool). Same
+ *  projection so a bulk row is byte-identical to a single lookup; callers 10-digit-validate first. */
+export async function getProviders(npis: string[]): Promise<ProviderRow[]> {
+  if (npis.length === 0) return [];
+  return query<ProviderRow>(
+    `SELECT p.npi, p.entity_type, p.org_name, p.first_name, p.last_name, p.middle_name,
+            p.credential, p.sex, p.practice_addr1, p.practice_addr2, p.practice_city,
+            p.practice_state, p.practice_zip, p.practice_phone, p.primary_taxonomy_code,
+            to_char(p.enumeration_date,  'YYYY-MM-DD') AS enumeration_date,
+            to_char(p.last_update_date,  'YYYY-MM-DD') AS last_update_date,
+            to_char(p.deactivation_date, 'YYYY-MM-DD') AS deactivation_date,
+            p.is_sole_proprietor, p.license_number, p.license_state,
+            t.display_name AS specialty, t.slug AS specialty_slug, t.classification, t.grouping
+       FROM providers p
+       LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
+      WHERE p.npi = ANY($1::text[])`,
+    [npis],
+  );
+}
+
 /** Clean, stable public JSON representation (for the API + bulk-lookup tool). */
 export function toPublicJson(p: ProviderRow) {
   const org = p.entity_type === "org";

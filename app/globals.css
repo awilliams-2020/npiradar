@@ -95,3 +95,16 @@ table.bulk { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 
 table.bulk th, table.bulk td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.bulk th { color: var(--muted); font-weight: 600; }
 textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Inline code + code blocks (API docs, explainers) */
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--bg-soft); border-radius: 4px; padding: 1px 5px; }
+pre { background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+pre code { background: none; padding: 0; font-size: inherit; }
+
+/* Developer API reference (tools pages) */
+.api-ep { margin: 22px 0; }
+.api-ep h3 { font-size: 15px; margin: 0 0 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
+.api-ep p { margin: 6px 0; }
+.verb { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; padding: 1px 7px; border-radius: 4px; margin-right: 8px; vertical-align: middle; }
+.verb.get { background: #e7f0ff; color: #0b5fff; }
+.verb.post { background: #e7f6ec; color: #1a7f37; }

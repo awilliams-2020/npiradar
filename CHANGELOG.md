@@ -5,6 +5,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Public API: bulk + search endpoints with first-class rate limiting (2026-07-13)
+
+**Why:** GSC surfaced real demand for programmatic access (e.g. *"ai tool that pulls bulk practice
+locations based on npi free nppes"*), but the only endpoint resolved a single known NPI — no batch,
+no discovery, and no app-level rate limiting beyond Traefik's coarse edge limit.
+
+**What changed:**
+- `POST /api/npi` — bulk lookup (≤100 NPIs) in one `WHERE npi = ANY(...)` round-trip
+  (`lib/provider.ts → getProviders`). `app/tools/bulk-lookup/bulk.tsx` now makes one POST instead of
+  a 100-way per-NPI client fan-out.
+- `GET /api/search` — filtered discovery by `name` / `specialty` / `state` / `city`
+  (`lib/facets.ts → searchProvidersApi`), with guardrails that keep every query on an index.
+- **Rate limiting as a shared primitive** — Redis-backed, cost-weighted, per-IP (`lib/redis.ts`,
+  `lib/ratelimit.ts`, `lib/api.ts`), applied to all three public endpoints. One token budget
+  (default 600/min/IP); single = 1, bulk = N NPIs, search = 10. Emits `X-RateLimit-*` + `Retry-After`.
+  Fails open if Redis is unreachable.
+- Deps/infra: `ioredis` added (+ `serverExternalPackages`); `REDIS_URL=redis://redis:6379` in the
+  `projects/npiradar` compose.
+
+**Operational detail + verification commands:** see `OPERATIONS.md`.
+
 ### Changed — Sitemap crawl-budget efficiency (2026-06-14)
 
 **Why:** A Search Console diagnosis (scripts in `~/project-research/gsc-diagnose.cjs`,

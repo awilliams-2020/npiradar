@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 
-// Paste many NPIs → look each up via the public /api/npi/[npi] endpoint → table + CSV export.
+// Paste many NPIs → one POST /api/npi bulk lookup → table + CSV export.
 const MAX = 100;
-const CONCURRENCY = 6;
 
 interface Row {
   npi: string;
@@ -45,29 +44,42 @@ export function BulkLookup() {
     setRows([]);
     if (npis.length === 0) return;
     setBusy(true);
-    const out: Row[] = [];
-    for (let i = 0; i < npis.length; i += CONCURRENCY) {
-      const batch = npis.slice(i, i + CONCURRENCY);
-      const results = await Promise.all(
-        batch.map(async (npi): Promise<Row> => {
-          try {
-            const r = await fetch(`/api/npi/${npi}`);
-            if (r.status === 404) return { npi, status: "not_found" };
-            if (!r.ok) return { npi, status: "error" };
-            const j = await r.json();
-            return {
-              npi, status: "ok", valid: j.valid, name: j.name, entityType: j.entityType,
-              specialty: j.specialty, city: j.practiceLocation?.city, state: j.practiceLocation?.state,
-            };
-          } catch {
-            return { npi, status: "error" };
-          }
-        }),
+    try {
+      const r = await fetch("/api/npi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ npis }),
+      });
+      if (r.status === 429) {
+        // Shared rate limit hit — surface it rather than silently showing errors.
+        setRows(npis.map((npi) => ({ npi, status: "error" })));
+        return;
+      }
+      if (!r.ok) {
+        setRows(npis.map((npi) => ({ npi, status: "error" })));
+        return;
+      }
+      const j = await r.json();
+      const found = new Map<string, Row>(
+        (j.results ?? []).map((p: {
+          npi: string; valid?: boolean; name?: string; entityType?: string | null;
+          specialty?: string | null; practiceLocation?: { city?: string; state?: string };
+        }) => [
+          p.npi,
+          {
+            npi: p.npi, status: "ok", valid: p.valid, name: p.name, entityType: p.entityType,
+            specialty: p.specialty, city: p.practiceLocation?.city, state: p.practiceLocation?.state,
+          } as Row,
+        ]),
       );
-      out.push(...results);
-      setRows([...out]);
+      const notFound = new Set<string>(j.notFound ?? []);
+      // Preserve the order the user pasted them in.
+      setRows(npis.map((npi) => found.get(npi) ?? { npi, status: notFound.has(npi) ? "not_found" : "error" }));
+    } catch {
+      setRows(npis.map((npi) => ({ npi, status: "error" })));
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   function download() {
