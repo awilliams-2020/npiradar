@@ -1,3 +1,15 @@
+# SEO-tool crawlers: no search or referral value to this site, and heavy. On 2026-09-22..24 Ahrefs alone
+# sent ~190k requests/day across five proxy networks, against ~40/day from Googlebot. They spread across
+# many IPs, so traefik's per-IP rate limit never engages; robots.txt is the lever they honor.
+User-agent: AhrefsBot
+User-agent: AhrefsSiteAudit
+User-agent: SemrushBot
+User-agent: MJ12bot
+User-agent: DotBot
+User-agent: BLEXBot
+User-agent: DataForSeoBot
+Disallow: /
+
 User-agent: *
 Allow: /
 
