@@ -35,7 +35,8 @@ Full research trail (all rounds, every GO/NO-GO verdict): `~/project-research/re
 | Framework | **Next.js (App Router, `output: standalone`)** | On-demand ISR renders millions of pages without pre-building; matches existing Traefik/compose deploy (theqrcode, balance) |
 | Data store | **PostgreSQL** | 8M+ rows, faceted queries, trigram name search; COPY-load from NPPES CSV |
 | Search | Postgres trigram (MVP) → Meilisearch/Typesense (optional later) | Provider name autocomplete |
-| CDN / cache | **Cloudflare** in front | Caches rendered HTML by URL → 8M pages served cheaply on first crawl |
+| CDN / cache | **None** — Next ISR `.next/cache` on-box | Traefik terminates TLS and serves every request directly; no Cloudflare |
+| Analytics | **Matomo site 9** (matomo.redbudway.com), JS-only | `app/_components/matomo.tsx`. JS-only on purpose: the scraper never runs JS, so Matomo counts real people. Audit: `docker exec -e IDSITE=9 -i th3-sh0p node - < ~/scripts/seo/matomo-audit.cjs` |
 | Deploy | Traefik + docker-compose | Per `~/projects/<name>` (compose+env) / `~/npiradar` (source+Dockerfile) convention |
 
 Alternative considered: **Astro** (great for content at scale) — viable, but Next reuses existing infra + experience. See `ARCHITECTURE.md`.

@@ -135,11 +135,38 @@ Google penalizes thin/doorway directories — the #1 risk here.
 
 ## 7. Technical SEO
 
-- **robots.txt** — present, `Allow: /` + sitemap line. Once facets exist, consider disallowing `/search?` (faceted
-  query noise) and any infinite-pagination traps.
-- **Real TLS + Cloudflare** — register `npiradar.com`, point DNS, switch Traefik to `certresolver=default`, put
-  Cloudflare in front to cache rendered HTML by URL (the economics that make 9.2M ISR pages viable). Until then the
-  self-signed cert blocks indexing.
+- **robots.txt** (`public/robots.txt`, kept comment-free because it's public) — `Allow: /` + sitemap, with two
+  groups disallowed:
+  - **SEO-tool crawlers** (Ahrefs, Semrush, MJ12, DotBot, BLEXBot, DataForSeo): no search or referral value, and
+    heavy. On 2026-09-22..24 Ahrefs alone sent ~190k req/day over five proxy networks vs ~40/day from Googlebot.
+    They spread across many IPs, so traefik's per-IP rate limit never engages; robots.txt is the lever they honor.
+  - **AI-training crawlers** (added 2026-09-26): `GPTBot` (~243k req/day), `meta-externalagent` (~138k/day),
+    `ClaudeBot`, `CCBot`, `Bytespider`, and `Applebot-Extended` (a training opt-out token; plain `Applebot` still
+    crawls for Siri/Spotlight search). The
+    content is a reformatted public CMS dataset, so being in training data earns nothing. AI *search* bots
+    (OAI-SearchBot, ChatGPT-User, PerplexityBot, Claude-SearchBot) stay allowed because they cite with links.
+  - **Hard-blocked too**, because robots.txt is voluntary: every UA above (except the `Applebot-Extended` token)
+    gets a traefik **403** on every path but `/robots.txt` — the `npiradar-blockbots` router in
+    `~/projects/npiradar/docker-compose.yml`. Keep its regex and this file's list in step. Verify with
+    `curl --resolve npiradar.com:443:127.0.0.1 -A GPTBot https://npiradar.com/` → 403.
+  - **Residential-proxy scraper** (~500 req/min on 2026-09-26, ~1 request per IP across ~12k IPs, zero
+    referers, no JS loads). It ignores robots.txt and fakes Chrome UAs, so neither lever above touches it.
+    ~80% of it claimed Chrome 110-146 over **HTTP/1.1**, which real Chrome never uses against an h2 server.
+    The `fakechrome` traefik plugin (`~/infrastructure/plugins-local/src/local/fakechrome`, middleware
+    `npiradar-fakechrome`) 403s exactly that: Chrome >= 100, HTTP/1.x, UA not a bot/Google tool, path not
+    `/robots.txt`. **The scraper switched to HTTP/2 within minutes**, so this cut served scraper pages only
+    ~20%; kept because it's free.
+  - **`jsgate`** (added 2026-09-26, same plugin dir, middleware `npiradar-jsgate`) is what stopped it. A
+    client without a valid `npr_gate` cookie gets a 2 KB NPIRadar-branded page (HTTP 503 + Retry-After,
+    `noindex`) whose JS solves a tiny SHA-256 proof of work, sets the cookie (7 days, bound to the UA) and
+    reloads. The scraper never runs JS. Result: scraper pages served went from ~500/min to 0, and npiradar CPU
+    from ~35-60% of a core to ~7%. **Skips the check:** verified Googlebot/Bingbot/Applebot/DuckDuckBot and the AI search fetchers
+    (OAI-SearchBot, ChatGPT-User, Perplexity, Claude-SearchBot) *by IP* (`~/scripts/crawler-ips`), link-preview UAs, and `/robots.txt`, sitemaps, `/api/` (public
+    API), `/_next/static/`, OG images, `/llms.txt`. 503 rather than 403 is deliberate: if Googlebot ever
+    lands on it, Google retries instead of de-indexing. **Watch:** Googlebot getting 503s in the traefik
+    log means the IP list is stale; `/api/` is now the open door if the scraper looks for one.
+  Once facets exist, consider disallowing `/search?` (faceted query noise) and any infinite-pagination traps.
+- **TLS / CDN** — real Let's Encrypt TLS via Traefik. **No Cloudflare**; ISR's on-box cache is the only caching layer.
 - **Core Web Vitals** — pages are server-rendered, minimal CSS, no client JS framework weight beyond Next runtime;
   in good shape. Keep provider pages light.
 - **Freshness** — `DATA_VINTAGE` in the footer + `lastmod` in sitemaps signal recency; wire up cache-busting on

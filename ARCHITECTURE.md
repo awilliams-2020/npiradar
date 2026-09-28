@@ -98,13 +98,13 @@ builds, enormous deploys). Instead:
 - Next.js App Router route segments with `export const revalidate = <monthly>` and **`generateStaticParams`
   returning only a small seed set** (top specialties/cities) — everything else renders **on first request**,
   then is cached.
-- **Cloudflare caches the rendered HTML by URL.** First crawler/visitor triggers a render; subsequent hits are
-  CDN edge cache. Effective cost approaches that of a static site, without pre-building.
+- **ISR caches the rendered HTML on-box** (`.next/cache`). First crawler/visitor triggers a render; subsequent hits
+  are served from that cache. There is no CDN in front.
 - Revalidate cadence ties to the **monthly NPPES refresh** — on new data load, bump a global cache version
   (or purge by tag) so pages re-render with fresh data.
 - Detail pages are discovered via **sitemaps + facet interlinking** (§5), not pre-render.
 
-This is the standard pSEO-at-scale pattern and keeps hosting on the existing single VPS + Cloudflare.
+This is the standard pSEO-at-scale pattern and keeps hosting on the existing single box.
 
 ---
 
@@ -153,7 +153,7 @@ Per the existing convention ([[deploy-convention-traefik-compose]]):
 
 - **`~/npiradar/`** — source + `Dockerfile` (Next.js `output: standalone`).
 - **`~/projects/npiradar/`** — `docker-compose.yml` + `.env`; Traefik labels for `npiradar.com`; services: `web`
-  (Next standalone) + `db` (Postgres, persistent volume). Cloudflare in front for CDN/cache + TLS origin.
+  (Next standalone) + `db` (Postgres, persistent volume). Traefik terminates TLS (Let's Encrypt); no CDN.
 - The **pipeline** (download/parse/load) runs as a scheduled job (cron/compose one-shot) monthly; it writes to the
   same Postgres and triggers cache revalidation.
 

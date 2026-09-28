@@ -81,7 +81,7 @@ Most of the SEO surface is built. Remaining:
 - **Go-live progress:** ✅ domain registered, ✅ DNS (apex + www → 46.110.4.68), ✅ real Let's Encrypt TLS live.
   **Remaining: submit `/sitemap.xml` to Google Search Console** (verify the domain property, then add the sitemap).
   Cloudflare **deliberately deferred** — Next ISR already caches rendered pages on-box, and Traefik `ratelimit` +
-  `traefik-ai-monitor` cover abuse; a CDN's edge/bandwidth/DDoS role isn't needed at zero traffic. Add later (with a
+  CrowdSec cover abuse; a CDN's edge/bandwidth/DDoS role isn't needed at zero traffic. Add later (with a
   Cloudflare Origin Cert or DNS-01, so it doesn't break Let's Encrypt) only if crawl load / bandwidth justifies it.
 - **Monthly refresh cache-bust** — handled by `pipeline/refresh.sh` (load + `--force-recreate`). Note: a plain
   `docker restart` does **not** clear `.next/cache` (ISR), so use the script / `--force-recreate`. Weekly
