@@ -1,4 +1,5 @@
 import { rateLimit, clientIp, rateHeaders, type RateResult } from "@/lib/ratelimit";
+import { recordUsage } from "@/lib/usage";
 
 // Shared preamble for the public JSON API (single lookup, bulk, search) so CORS + rate limiting are
 // identical everywhere and can't drift between routes.
@@ -17,7 +18,9 @@ export type Guard =
 // Charge `cost` tokens against the caller's IP budget. On the allow path returns headers to spread into
 // the route's own Response; on the deny path returns a ready-made 429 so callers just `return g.limited`.
 export async function guard(req: Request, cost: number): Promise<Guard> {
-  const r: RateResult = await rateLimit(clientIp(req), cost);
+  const ip = clientIp(req);
+  const r: RateResult = await rateLimit(ip, cost);
+  recordUsage(req, ip, cost, !r.ok);
   const headers = { ...CORS, ...rateHeaders(r) };
   if (!r.ok) {
     return {

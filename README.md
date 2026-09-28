@@ -37,9 +37,31 @@ Full research trail (all rounds, every GO/NO-GO verdict): `~/project-research/re
 | Search | Postgres trigram (MVP) → Meilisearch/Typesense (optional later) | Provider name autocomplete |
 | CDN / cache | **None** — Next ISR `.next/cache` on-box | Traefik terminates TLS and serves every request directly; no Cloudflare |
 | Analytics | **Matomo site 9** (matomo.redbudway.com), JS-only | `app/_components/matomo.tsx`. JS-only on purpose: the scraper never runs JS, so Matomo counts real people. Audit: `docker exec -e IDSITE=9 -i th3-sh0p node - < ~/scripts/seo/matomo-audit.cjs` |
+| API usage | **`public.api_usage`** (Postgres), daily rollup | `lib/usage.ts`, written from the shared API guard. Matomo can't see API calls (no JS), so this is the only long-lived record. See **API usage** below. |
 | Deploy | Traefik + docker-compose | Per `~/projects/<name>` (compose+env) / `~/npiradar` (source+Dockerfile) convention |
 
 Alternative considered: **Astro** (great for content at scale) — viable, but Next reuses existing infra + experience. See `ARCHITECTURE.md`.
+
+## API usage
+
+Is anyone using the free API? Added 2026-09-28 to answer that over months, which neither Traefik's log
+(~3 days) nor container stdout (lost on the monthly recreate) can. `lib/usage.ts` upserts one row per
+`(day UTC, endpoint, source, caller)` for every call that reaches the rate limiter (bad requests
+rejected earlier aren't counted). `endpoint` is `lookup` | `bulk` | `search`; `source` is `site` (our own
+`/tools/bulk-lookup`, by Origin/Referer) or `external`; `caller` is the client IP with its last block zeroed (IPv4 /24, IPv6 /48 — Matomo's granularity);
+`units` is rate-limit cost (NPIs looked up; search = 10); `limited` counts 429s.
+
+```bash
+PSQL='docker exec -i postgres psql -U postgres -d npiradar'
+# External demand by month: calls, distinct callers, callers seen on 2+ days (= real integrations)
+$PSQL -c "SELECT date_trunc('month',day)::date m, endpoint, sum(requests) calls, count(DISTINCT caller) callers
+          FROM api_usage WHERE source='external' GROUP BY 1,2 ORDER BY 1,2"
+$PSQL -c "SELECT caller, count(DISTINCT day) days, sum(requests) calls, max(last_ua) ua
+          FROM api_usage WHERE source='external' GROUP BY 1 HAVING count(DISTINCT day)>1 ORDER BY calls DESC"
+```
+
+Read it as: repeat external callers with non-browser UAs (curl, python-requests, a named app) are the
+only real signal of paid-tier demand. One-off hits are people or bots poking the docs.
 
 ## Repo layout (planned)
 
