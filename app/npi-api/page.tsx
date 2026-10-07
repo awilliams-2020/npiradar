@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Breadcrumbs } from "@/app/_components/facet";
-import { DATA_VINTAGE } from "@/lib/format";
+import { dataVintage } from "@/lib/facets";
+
+// Static at build (no DB there), so re-render daily to swap the fallback vintage label for the real one.
+export const revalidate = 86400;
 
 // Docs for the public API (app/api/npi, app/api/search). Its own page so "npi api" / "free npi api" /
 // "npi lookup api" land on a page about the API, rather than an H2 at the bottom of the bulk tool.
@@ -32,13 +35,14 @@ const single = `{
   "url": "https://npiradar.com/npi/1306701685"
 }`;
 
-export default function NpiApiPage() {
+export default async function NpiApiPage() {
+  const vintage = await dataVintage();
   return (
     <article>
       <Breadcrumbs items={[{ name: "Home", href: "/" }, { name: "NPI API", href: "/npi-api" }]} />
       <h1>Free NPI API</h1>
       <p className="sub">
-        A free JSON API over the public NPPES registry ({DATA_VINTAGE}). Look up a single NPI, batch up to 100 NPIs
+        A free JSON API over the public NPPES registry ({vintage}). Look up a single NPI, batch up to 100 NPIs
         per request, or search providers by name, specialty, state, and city. No API key and no signup. Responses
         are CORS-enabled, so you can call it straight from a browser.
       </p>

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { DATA_VINTAGE } from "@/lib/format";
+import { dataVintage } from "@/lib/facets";
 import { Matomo } from "./_components/matomo";
 import "./globals.css";
 
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   twitter: { card: "summary_large_image" },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
@@ -39,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <footer className="site">
           <div className="container">
             <p>
-              Data: {DATA_VINTAGE}, a public-domain dataset from CMS. NPIRadar is not affiliated with
+              Data: {await dataVintage()}, a public-domain dataset from CMS. NPIRadar is not affiliated with
               or endorsed by CMS.
             </p>
           </div>

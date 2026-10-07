@@ -23,4 +23,4 @@ echo "==> [2/2] recreating npiradar container to clear ISR + in-process cachesâ€
 docker compose -f "$COMPOSE_DIR/docker-compose.yml" up -d --force-recreate npiradar
 
 echo "==> done. The live site now serves the fresh data."
-echo "    Reminder: bump DATA_VINTAGE in lib/format.ts if the release month changed (then redeploy)."
+echo "    The site's data-vintage label reads public.refresh_runs, so a manual load here does not update it."

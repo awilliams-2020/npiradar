@@ -32,5 +32,6 @@ export function formatPhone(phone: string | null): string | null {
   return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : phone;
 }
 
-/** Data vintage shown for freshness/attribution; bump on each monthly load. */
-export const DATA_VINTAGE = "NPPES — May 2026 release";
+/** Data-vintage label for when the real one (`dataVintage()` in lib/facets.ts) can't be read — e.g. at
+ *  `next build`, which has no DB. Deliberately names no month, so it can never go stale. */
+export const DATA_VINTAGE_FALLBACK = "NPPES monthly release";

@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Breadcrumbs } from "@/app/_components/facet";
 import { BulkLookup } from "./bulk";
-import { DATA_VINTAGE } from "@/lib/format";
+import { dataVintage } from "@/lib/facets";
+
+// Static at build (no DB there), so re-render daily to swap the fallback vintage label for the real one.
+export const revalidate = 86400;
 
 export const metadata: Metadata = {
   title: "Bulk NPI Lookup — Look Up Many NPI Numbers at Once",
@@ -12,7 +15,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/tools/bulk-lookup" },
 };
 
-export default function BulkLookupPage() {
+export default async function BulkLookupPage() {
+  const vintage = await dataVintage();
   return (
     <article>
       <Breadcrumbs items={[{ name: "Home", href: "/" }, { name: "Bulk NPI Lookup", href: "/tools/bulk-lookup" }]} />
@@ -30,7 +34,7 @@ export default function BulkLookupPage() {
         <p>
           Paste NPIs in any format: one per line, comma-separated, or copied straight out of a spreadsheet
           column. The tool pulls out every 10-digit number, drops duplicates, and looks up the first 100 in a single
-          request against the NPPES registry ({DATA_VINTAGE}). Results come back in the order you pasted them, so
+          request against the NPPES registry ({vintage}). Results come back in the order you pasted them, so
           the CSV lines up row-for-row with your original list. Need a single provider instead? Use the{" "}
           <Link href="/">NPI search</Link>.
         </p>

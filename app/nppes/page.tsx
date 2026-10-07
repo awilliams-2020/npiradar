@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Breadcrumbs } from "@/app/_components/facet";
-import { DATA_VINTAGE } from "@/lib/format";
+import { dataVintage } from "@/lib/facets";
+
+// Static at build (no DB there), so re-render daily to swap the fallback vintage label for the real one.
+export const revalidate = 86400;
 
 // Explainer for the "nppes" / "nppes npi registry" / "npi registry" demand (Planner 2026-07: 74k / 40.5k /
 // 135k per month, the domain's highest-CPC unclaimed terms). Answer-first, plain-text facts, no DB → static.
@@ -13,7 +16,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/nppes" },
 };
 
-export default function NppesPage() {
+export default async function NppesPage() {
+  const vintage = await dataVintage();
   return (
     <article>
       <Breadcrumbs items={[{ name: "Home", href: "/" }, { name: "NPPES NPI Registry", href: "/nppes" }]} />
@@ -86,7 +90,7 @@ export default function NppesPage() {
       <section style={{ marginTop: 32 }}>
         <h2>How to search the NPI Registry on NPIRadar</h2>
         <p>
-          NPIRadar loads the NPPES Downloadable File (currently the {DATA_VINTAGE}) into a database and indexes it
+          NPIRadar loads the NPPES Downloadable File (currently the {vintage}) into a database and indexes it
           the ways people actually search:
         </p>
         <ul>

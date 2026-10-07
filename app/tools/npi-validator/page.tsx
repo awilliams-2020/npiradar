@@ -3,6 +3,9 @@ import Link from "next/link";
 import { Breadcrumbs } from "@/app/_components/facet";
 import { Validator } from "./validator";
 
+// Static at build (no DB there), so re-render daily to swap the fallback vintage label for the real one.
+export const revalidate = 86400;
+
 export const metadata: Metadata = {
   title: "NPI Validator — Check an NPI Number's Check Digit",
   description:

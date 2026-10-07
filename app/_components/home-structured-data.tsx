@@ -1,5 +1,5 @@
 import { SITE_URL } from "@/lib/sitemap";
-import { DATA_VINTAGE } from "@/lib/format";
+import { dataVintage } from "@/lib/facets";
 
 // Home-page structured data + the visible FAQ that backs it. One Q&A source of truth drives both the
 // on-page copy and the FAQPage JSON-LD, so the rich-result markup can never drift from what a reader
@@ -42,7 +42,7 @@ const FAQS: { q: string; a: string }[] = [
   },
 ];
 
-export function HomeStructuredData() {
+export async function HomeStructuredData() {
   const faqLd = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
@@ -72,9 +72,9 @@ export function HomeStructuredData() {
     ],
     license: "https://www.usa.gov/government-works",
     isAccessibleForFree: true,
-    version: DATA_VINTAGE,
+    version: await dataVintage(),
     creator: {
-      "@type": "GovernmentOrganization",
+      "@type": "Organization",
       name: "Centers for Medicare & Medicaid Services",
       alternateName: "CMS",
       url: "https://www.cms.gov",

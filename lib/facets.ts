@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { DATA_VINTAGE_FALLBACK } from "@/lib/format";
 
 // Query layer for the facet pages (specialty / city / specialty×city), their sibling links, and the
 // facet sitemaps. Reads the materialized views from pipeline/facets.sql + the providers indexes.
@@ -37,6 +38,28 @@ export async function dataVersion(): Promise<string> {
   if (date < SITEMAP_RULES_VERSION) date = SITEMAP_RULES_VERSION;
   dataVersionCache = { date, at: Date.now() };
   return date;
+}
+
+// Data vintage = the CMS release the live data came from, e.g. "NPPES — September 2026 release", read
+// from the refresh runner's last successful load (public.refresh_runs). Replaces a hand-bumped constant
+// that sat at "May 2026" for four loads. Cached an hour; the post-swap /api/revalidate re-renders pages.
+let vintageCache: { label: string; at: number } | null = null;
+export async function dataVintage(): Promise<string> {
+  const HOUR = 3_600_000;
+  if (vintageCache && Date.now() - vintageCache.at < HOUR) return vintageCache.label;
+  try {
+    const rows = await query<{ source_file: string | null }>(
+      `SELECT source_file FROM public.refresh_runs WHERE state = 'success' ORDER BY id DESC LIMIT 1`,
+    );
+    const m = rows[0]?.source_file?.match(/_([A-Z][a-z]+)_(\d{4})/); // NPPES_Data_Dissemination_September_2026_V2.zip
+    if (m) {
+      vintageCache = { label: `NPPES — ${m[1]} ${m[2]} release`, at: Date.now() };
+      return vintageCache.label;
+    }
+  } catch {
+    /* no DB (build time) or table missing → fallback, uncached so the next render retries */
+  }
+  return DATA_VINTAGE_FALLBACK;
 }
 
 export interface ProviderListItem {

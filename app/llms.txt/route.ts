@@ -1,6 +1,6 @@
 import { SITE_URL } from "@/lib/sitemap";
-import { topSpecialties, topCities } from "@/lib/facets";
-import { DATA_VINTAGE, titleCase } from "@/lib/format";
+import { topSpecialties, topCities, dataVintage } from "@/lib/facets";
+import { titleCase } from "@/lib/format";
 import { query } from "@/lib/db";
 
 // /llms.txt — a curated map of the site for LLM crawlers and answer engines (the llms.txt
@@ -42,13 +42,14 @@ async function snapshot(): Promise<Snapshot> {
 }
 
 export async function GET() {
+  const vintage = await dataVintage();
   const { providers, specialties, cities } = await snapshot();
   const count = providers ? Number(providers).toLocaleString("en-US") : "9.5 million";
 
   const lines: string[] = [
     "# NPIRadar",
     "",
-    `> Free NPI lookup and provider directory over the public NPPES registry — the ${DATA_VINTAGE}. ` +
+    `> Free NPI lookup and provider directory over the public NPPES registry — the ${vintage}. ` +
       `Search ${count} US healthcare providers by NPI number, name, specialty, or city, and see each ` +
       `provider's taxonomy, credentials, and practice location. NPIRadar is an independent directory; ` +
       `it is not affiliated with or endorsed by CMS.`,
@@ -93,7 +94,7 @@ export async function GET() {
     "",
     "## Notes",
     "- Data source: NPPES (National Plan & Provider Enumeration System), a public-domain CMS dataset.",
-    `- Data vintage: ${DATA_VINTAGE}. Refreshed on the monthly NPPES release.`,
+    `- Data vintage: ${vintage}. Refreshed on the monthly NPPES release.`,
     "- Geo facets use each provider's *practice* location (not the mailing address).",
     "- Deactivated NPIs stay reachable but are excluded from the search index.",
   );
