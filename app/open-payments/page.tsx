@@ -63,8 +63,8 @@ export default async function OpenPaymentsPage() {
         {latest ? ` In ${latest.program_year}, ${latest.recipients.toLocaleString()} clinicians received ${usd(latest.total_usd)} in general payments.` : ""}
       </p>
 
-      <form action="/search" method="get" className="bulk-actions" style={{ marginTop: 16 }}>
-        <input type="search" name="q" placeholder="Doctor's last name, or an NPI number" aria-label="Doctor name or NPI" required />
+      <form className="search" action="/search">
+        <input name="q" placeholder="Doctor's last name, or an NPI number" aria-label="Doctor name or NPI" required />
         <button type="submit">Search</button>
       </form>
 
