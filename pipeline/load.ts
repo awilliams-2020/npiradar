@@ -14,6 +14,8 @@
  *   --side                 COPY the release's side files (other names, secondary locations, endpoints),
  *                          found next to the npidata CSV by its date range; runs alongside the shards
  *   --finalize             add PK + indexes + ANALYZE, then run verification queries
+ *   --diff NAME            record what changed per NPI between schema NAME (new) and "live" (current)
+ *                          into public.provider_changes; run after --finalize, before --swap
  *
  * Usage:
  *   tsx pipeline/load.ts <npidata.csv> --taxonomy <nucc.csv>        # single-process, everything
@@ -40,13 +42,15 @@ const dbName = (() => { try { return new URL(DATABASE_URL).pathname.replace(/^\/
 const qIdent = (s: string) => { if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) throw new Error(`unsafe identifier: ${s}`); return `"${s}"`; };
 const targetSchema = flag("--schema");
 const swapSchema = flag("--swap");
+const diffSchema = flag("--diff");
+const diffAgainst = flag("--against") ?? "live"; // the current release; overridable for testing
 
 // mode resolution: any explicit mode flag disables the implicit "do everything" run
 const doPrepare = args.includes("--prepare");
 const doFinalize = args.includes("--finalize");
 const doSide = args.includes("--side");
 const shardSpec = flag("--shard");
-const explicit = doPrepare || doFinalize || doSide || shardSpec !== undefined || swapSchema !== undefined;
+const explicit = doPrepare || doFinalize || doSide || shardSpec !== undefined || swapSchema !== undefined || diffSchema !== undefined;
 const runSide = doSide || !explicit;
 const runPrepare = doPrepare || !explicit;
 const runFinalize = doFinalize || !explicit;
@@ -54,7 +58,7 @@ const shard = shardSpec
   ? (() => { const [i, n] = shardSpec.split("/").map(Number); if (!(n >= 1 && i >= 0 && i < n)) throw new Error(`bad --shard ${shardSpec}`); return { i, n }; })()
   : explicit ? null : { i: 0, n: 1 };
 
-if (!swapSchema && (!inputPath || inputPath.startsWith("--"))) {
+if (!swapSchema && !diffSchema && (!inputPath || inputPath.startsWith("--"))) {
   console.error("usage: tsx pipeline/load.ts <npidata.csv> --taxonomy <nucc.csv> [--prepare|--shard i/N|--finalize] [--schema NAME] [--swap NAME]");
   process.exit(1);
 }
@@ -253,6 +257,80 @@ async function finalize(client: pg.Client) {
 }
 
 /**
+ * Month-over-month change log. NPPES publishes only the current state, so history exists only if we
+ * keep it: each load diffs the new schema against live and appends to public.provider_changes, which
+ * sits outside the swapped schemas and so accumulates. Can't be backfilled — started 2026-10-07.
+ *
+ * `release` = the new file's max(last_update_date). If live holds the same release (a re-run of the same
+ * file), skip: diffing a release against itself would replace that release's real changes with nothing.
+ * Deactivated records come with most fields blanked, so a (de|re)activation is recorded alone, and field
+ * changes are only compared between two active records.
+ */
+async function doDiff(client: pg.Client, schema: string, against: string) {
+  const s = qIdent(schema), live = qIdent(against);
+  await client.query(`CREATE TABLE IF NOT EXISTS public.provider_changes (
+    release date NOT NULL,
+    npi text NOT NULL,
+    change text NOT NULL,      -- added | removed | deactivated | reactivated | practice_address | practice_phone
+                               -- | primary_taxonomy | name | credential | license
+    old_value text,
+    new_value text,
+    PRIMARY KEY (npi, release, change)
+  )`);
+  await client.query(`CREATE INDEX IF NOT EXISTS idx_provider_changes_release ON public.provider_changes (release, change)`);
+
+  const rel = await client.query<{ new_rel: string | null; old_rel: string | null; has_live: boolean }>(`
+    SELECT (SELECT max(last_update_date)::text FROM ${s}.providers) AS new_rel,
+           (SELECT max(last_update_date)::text FROM ${live}.providers) AS old_rel,
+           true AS has_live`).catch((e) => {
+    if ((e as { code?: string }).code === "42P01") return { rows: [{ new_rel: null, old_rel: null, has_live: false }] };
+    throw e;
+  });
+  const { new_rel, old_rel, has_live } = rel.rows[0];
+  if (!has_live || !new_rel || !old_rel) { console.log("diff: no live schema to compare against — skipped"); return; }
+  if (new_rel <= old_rel) { console.log(`diff: ${schema} release ${new_rel} is not newer than live ${old_rel} — skipped`); return; }
+
+  const addr = (t: string) => `NULLIF(concat_ws(', ', ${t}.practice_addr1, ${t}.practice_addr2, ${t}.practice_city, ${t}.practice_state, ${t}.practice_zip), '')`;
+  const name = (t: string) => `NULLIF(COALESCE(${t}.org_name, concat_ws(' ', ${t}.first_name, ${t}.middle_name, ${t}.last_name)), '')`;
+  const lic = (t: string) => `NULLIF(concat_ws(' ', ${t}.license_number, ${t}.license_state), '')`;
+  // Single-threaded, modest work_mem: a parallel hash join at 256MB/worker overflowed postgres's 1GB
+  // /dev/shm (2026-10-07), the resource the live sites share. Serial takes ~25s on 9.8M rows.
+  await client.query("SET max_parallel_workers_per_gather = 0; SET work_mem = '64MB'");
+  await client.query("BEGIN");
+  await client.query(`DELETE FROM public.provider_changes WHERE release = $1`, [new_rel]);
+  const ins = await client.query(`
+    INSERT INTO public.provider_changes (release, npi, change, old_value, new_value)
+    SELECT $1::date, n.npi, 'added', NULL, NULL FROM ${s}.providers n
+     WHERE NOT EXISTS (SELECT 1 FROM ${live}.providers o WHERE o.npi = n.npi)
+    UNION ALL
+    SELECT $1::date, o.npi, 'removed', NULL, NULL FROM ${live}.providers o
+     WHERE NOT EXISTS (SELECT 1 FROM ${s}.providers n WHERE n.npi = o.npi)
+    UNION ALL
+    SELECT $1::date, n.npi, v.change, v.old_value, v.new_value
+      FROM ${s}.providers n JOIN ${live}.providers o USING (npi)
+      CROSS JOIN LATERAL (VALUES
+        ('deactivated', NULL, n.deactivation_date::text,
+           o.deactivation_date IS NULL AND n.deactivation_date IS NOT NULL),
+        ('reactivated', o.deactivation_date::text, NULL,
+           o.deactivation_date IS NOT NULL AND n.deactivation_date IS NULL),
+        ('practice_address', ${addr("o")}, ${addr("n")}, ${addr("o")} IS DISTINCT FROM ${addr("n")}),
+        ('practice_phone', o.practice_phone, n.practice_phone, o.practice_phone IS DISTINCT FROM n.practice_phone),
+        ('primary_taxonomy', o.primary_taxonomy_code, n.primary_taxonomy_code,
+           o.primary_taxonomy_code IS DISTINCT FROM n.primary_taxonomy_code),
+        ('name', ${name("o")}, ${name("n")}, ${name("o")} IS DISTINCT FROM ${name("n")}),
+        ('credential', o.credential, n.credential, o.credential IS DISTINCT FROM n.credential),
+        ('license', ${lic("o")}, ${lic("n")}, ${lic("o")} IS DISTINCT FROM ${lic("n")})
+      ) AS v(change, old_value, new_value, changed)
+     WHERE v.changed
+       AND (v.change IN ('deactivated', 'reactivated')
+            OR (o.deactivation_date IS NULL AND n.deactivation_date IS NULL))`, [new_rel]);
+  await client.query("COMMIT");
+  const sum = await client.query(`SELECT change, count(*)::int AS n FROM public.provider_changes WHERE release = $1 GROUP BY 1 ORDER BY 2 DESC`, [new_rel]);
+  console.log(`diff: release ${new_rel} vs live ${old_rel} → ${ins.rowCount?.toLocaleString()} changes`);
+  console.table(sum.rows);
+}
+
+/**
  * Atomically promote a freshly-built schema to "live" — the zero-downtime swap. All renames run in
  * one transaction, so readers see the switch instantly while any in-flight query finishes against
  * the old objects. The previous live schema is retained as "old" until the next swap, giving a
@@ -281,6 +359,14 @@ async function doSwap(client: pg.Client, schema: string) {
 async function main() {
   const client = new pg.Client({ connectionString: DATABASE_URL });
   await client.connect();
+
+  if (diffSchema) {
+    console.log(`connected → ${DATABASE_URL.replace(/:[^:@/]+@/, ":***@")}  [diff ${diffSchema} vs ${diffAgainst}]`);
+    await doDiff(client, diffSchema, diffAgainst);
+    await client.end();
+    console.log("done.");
+    return;
+  }
 
   if (swapSchema) {
     console.log(`connected → ${DATABASE_URL.replace(/:[^:@/]+@/, ":***@")}  [swap ${swapSchema}→live]`);

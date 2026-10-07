@@ -176,3 +176,75 @@ export function extrasToPublicJson(x: ProviderExtras) {
     endpointCount: x.endpointCount,
   };
 }
+
+// ── Registry history: month-over-month changes recorded at each load (pipeline/load.ts --diff) ──────
+
+export interface ProviderChange {
+  release: string; // YYYY-MM-DD, the release's max(last_update_date)
+  change: string;
+  old_value: string | null;
+  new_value: string | null;
+  old_label: string | null; // taxonomy display names, for primary_taxonomy rows
+  new_label: string | null;
+}
+
+export async function getProviderChanges(npi: string): Promise<ProviderChange[]> {
+  if (!/^\d{10}$/.test(npi)) return [];
+  try {
+    return await query<ProviderChange>(
+      `SELECT to_char(c.release, 'YYYY-MM-DD') AS release, c.change, c.old_value, c.new_value,
+              ot.display_name AS old_label, nt.display_name AS new_label
+         FROM public.provider_changes c
+         LEFT JOIN taxonomy ot ON c.change = 'primary_taxonomy' AND ot.code = c.old_value
+         LEFT JOIN taxonomy nt ON c.change = 'primary_taxonomy' AND nt.code = c.new_value
+        WHERE c.npi = $1 AND c.change <> 'removed'
+        ORDER BY c.release DESC, c.change
+        LIMIT 100`,
+      [npi],
+    );
+  } catch (e) {
+    if ((e as { code?: string }).code === "42P01") return []; // no load has recorded changes yet
+    throw e;
+  }
+}
+
+/** "1700 NEUSE BLVD, NEW BERN, NC, 285602304" → "1700 Neuse Blvd, New Bern, NC 28560-2304". */
+function formatStoredAddress(a: string | null): string | null {
+  if (!a) return null;
+  const parts = a.split(", ");
+  const zip = /^\d{5,9}$/.test(parts[parts.length - 1] ?? "") ? formatZip(parts.pop()!) : null;
+  const state = /^[A-Z]{2}$/.test(parts[parts.length - 1] ?? "") ? parts.pop()! : null;
+  return [...parts.map((p) => titleCase(p)), [state, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
+
+const STATUS_CHANGES = new Set(["added", "deactivated", "reactivated"]);
+
+const CHANGE_LABELS: Record<string, string> = {
+  added: "Added to the registry",
+  deactivated: "Deactivated",
+  reactivated: "Reactivated",
+  practice_address: "Practice address changed",
+  practice_phone: "Practice phone changed",
+  primary_taxonomy: "Primary specialty changed",
+  name: "Name changed",
+  credential: "Credential changed",
+  license: "License changed",
+};
+
+/** Display-ready change, shared by the page and the API so they can't drift. */
+export function describeChange(c: ProviderChange) {
+  const fmt = (v: string | null, label: string | null) =>
+    c.change === "practice_address" ? formatStoredAddress(v)
+    : c.change === "practice_phone" ? formatPhone(v)
+    : c.change === "primary_taxonomy" ? (label ? `${label} (${v})` : v)
+    : c.change === "name" ? titleCase(v)
+    : v;
+  return {
+    release: c.release,
+    change: c.change,
+    label: c.change === "deactivated" && c.new_value ? `Deactivated, effective ${c.new_value}` : CHANGE_LABELS[c.change] ?? c.change,
+    // Status changes are their own statement; only field changes carry a from → to.
+    from: STATUS_CHANGES.has(c.change) ? null : fmt(c.old_value, c.old_label),
+    to: STATUS_CHANGES.has(c.change) ? null : fmt(c.new_value, c.new_label),
+  };
+}

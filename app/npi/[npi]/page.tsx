@@ -2,13 +2,16 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
-import { getProvider, getProviderExtras, OTHER_NAME_TYPES, type ProviderRow } from "@/lib/provider";
+import { getProvider, getProviderExtras, getProviderChanges, describeChange, OTHER_NAME_TYPES, type ProviderRow } from "@/lib/provider";
 import { slugify, cityStateSlug } from "@/lib/slug";
 import { stateName, STATE_NAMES } from "@/lib/states";
 import { Breadcrumbs, LinkChips } from "@/app/_components/facet";
 
 export const revalidate = 2592000; // 30d — matches the monthly NPPES refresh cadence
 export const dynamicParams = true; // render any NPI on first request, then cache (ISR at 8M scale)
+
+const monthYear = (d: string) =>
+  new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 
 function locationLine(p: ProviderRow): string {
   return [titleCase(p.practice_city), p.practice_state].filter(Boolean).join(", ");
@@ -59,7 +62,7 @@ function JsonLd({ p }: { p: ProviderRow }) {
 
 export default async function ProviderPage({ params }: { params: Promise<{ npi: string }> }) {
   const { npi } = await params;
-  const [p, x] = await Promise.all([getProvider(npi), getProviderExtras(npi)]);
+  const [p, x, changes] = await Promise.all([getProvider(npi), getProviderExtras(npi), getProviderChanges(npi)]);
   if (!p) notFound();
 
   const name = fullName(p);
@@ -172,6 +175,21 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
           {x.endpointCount > x.endpoints.length && (
             <p className="sub">Showing {x.endpoints.length} of {x.endpointCount}. The full list is in the <a href={`/api/npi/${p.npi}`}>JSON API</a>.</p>
           )}
+        </section>
+      )}
+
+      {changes.length > 0 && (
+        <section>
+          <h2>Registry history</h2>
+          <p className="sub">Changes NPIRadar detected between monthly NPPES releases. CMS publishes only the current record.</p>
+          <ul>
+            {changes.map(describeChange).map((c, i) => (
+              <li key={i}>
+                <span className="sub">{monthYear(c.release)}</span> · <strong>{c.label}</strong>
+                {c.from || c.to ? <>: {c.from ?? "—"} → {c.to ?? "—"}</> : null}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

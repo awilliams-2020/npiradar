@@ -61,6 +61,11 @@ async function main() {
   // half-loaded schema. (load.ts --swap ignores the CSV/--schema passthrough and just renames.)
   if (doSwap) {
     const s = targetSchema ?? "staging";
+    // Change log first, against the still-live previous release. Additive, so a failure here is logged
+    // and never blocks the swap — one month's history lost beats a month of stale data.
+    console.log(`[diff] recording changes in "${s}" vs live`);
+    await run("diff", ["--diff", s]).catch((e) => console.error(`[diff] FAILED (swap continues): ${e}`));
+
     console.log(`[swap] promoting schema "${s}" → live`);
     await run("swap", ["--swap", s]);
   }

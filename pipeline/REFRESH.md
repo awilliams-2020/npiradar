@@ -9,6 +9,10 @@ trigger returns `200 up_to_date` when nothing is newer and `409` while a run is 
 Each load also brings in the release's three side files (`othername`, `pl`, `endpoint`) →
 `provider_other_names`, `provider_locations`, `provider_endpoints`. They are shown on `/npi/[npi]` and
 returned by `GET /api/npi/{npi}`.
+
+Before each swap, `load.ts --diff staging` records what changed per NPI into
+`public.provider_changes`. That table is permanent history, outside the swapped schemas. It can't be
+rebuilt, so it is the one table here that must be backed up. See CHANGELOG 2026-10-07.
 Built 2026-05-24. See also `pipeline/README.md` (the manual pipeline) and `STATUS.md`.
 
 ## How it works

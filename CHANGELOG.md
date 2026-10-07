@@ -5,6 +5,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Registry history: month-over-month change log (2026-10-07)
+
+**Why:** NPPES publishes only each provider's current record. History exists only if someone keeps it,
+and it can't be backfilled, so every load we skip is lost for good. It is the one thing on a provider
+page that CMS's own registry can't show.
+
+**What changed:**
+- `load.ts --diff <schema>` compares the freshly built schema with `live` and writes
+  `public.provider_changes (release, npi, change, old_value, new_value)`. That table sits outside the swapped
+  schemas, so it accumulates. Change types: `added`, `removed`, `deactivated`, `reactivated`,
+  `practice_address`, `practice_phone`, `primary_taxonomy`, `name`, `credential`, `license`.
+- `load-parallel.ts` runs it right before `--swap`. A failed diff is logged and never blocks the swap.
+- `release` = the new file's `max(last_update_date)`. A same-release re-run is skipped, so it can't wipe
+  that month's diff. Deactivated records arrive with fields blanked, so a (de)activation is recorded alone.
+- Runs serially at `work_mem=64MB` (~25s on 9.8M rows). A parallel hash join at 256MB/worker overflowed
+  postgres's 1GB `/dev/shm`.
+- `/npi/[npi]` shows a "Registry history" section; `GET /api/npi/{npi}` adds `changes`.
+- **First diff: the October 2026 release** (September vs September gave 0 differences, a sanity check).
+
 ### Changed — Real data-vintage label, 6-hourly refresh check, NPPES side files (2026-10-07)
 
 **Why:** The site said "NPPES — May 2026 release" while serving the September file. `DATA_VINTAGE` was a
