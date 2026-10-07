@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
-import { getProvider, getProviderExtras, getProviderChanges, describeChange, OTHER_NAME_TYPES, type ProviderRow } from "@/lib/provider";
+import { getProvider, getProviderExtras, getProviderChanges, getOigExclusions, describeChange, OTHER_NAME_TYPES, type ProviderRow } from "@/lib/provider";
 import { slugify, cityStateSlug } from "@/lib/slug";
 import { stateName, STATE_NAMES } from "@/lib/states";
 import { Breadcrumbs, LinkChips } from "@/app/_components/facet";
+import { oigSection, oigTypeLabel, OIG_VERIFY_URL } from "@/lib/oig";
 
 export const revalidate = 2592000; // 30d — matches the monthly NPPES refresh cadence
 export const dynamicParams = true; // render any NPI on first request, then cache (ISR at 8M scale)
@@ -62,7 +63,7 @@ function JsonLd({ p }: { p: ProviderRow }) {
 
 export default async function ProviderPage({ params }: { params: Promise<{ npi: string }> }) {
   const { npi } = await params;
-  const [p, x, changes] = await Promise.all([getProvider(npi), getProviderExtras(npi), getProviderChanges(npi)]);
+  const [p, x, changes, oig] = await Promise.all([getProvider(npi), getProviderExtras(npi), getProviderChanges(npi), getOigExclusions(npi)]);
   if (!p) notFound();
 
   const name = fullName(p);
@@ -107,6 +108,21 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
         <p className="banner">
           This NPI was <strong>deactivated</strong> on {p.deactivation_date} and is no longer active in the registry.
         </p>
+      )}
+
+      {oig.length > 0 && (
+        <div className="banner">
+          <strong>This NPI is on the HHS OIG List of Excluded Individuals/Entities (LEIE).</strong>{" "}
+          {oig.map((e, i) => (
+            <span key={i}>
+              {i > 0 ? "; " : ""}Excluded {e.excl_date ? `since ${e.excl_date} ` : ""}under {oigSection(e.excl_type)}
+              {oigTypeLabel(e.excl_type) ? ` (${oigTypeLabel(e.excl_type)})` : ""}
+              {e.waiver_date ? `, with a waiver from ${e.waiver_date}${e.waiver_state ? ` in ${e.waiver_state}` : ""}` : ""}
+            </span>
+          ))}
+          . Matched by NPI to OIG&apos;s list{oig[0].loaded_at ? ` as of ${oig[0].loaded_at}` : ""}. Confirm at{" "}
+          <a href={OIG_VERIFY_URL} rel="nofollow noopener">exclusions.oig.hhs.gov</a> before relying on it.
+        </div>
       )}
 
       <dl className="facts">

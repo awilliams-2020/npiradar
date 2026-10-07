@@ -156,6 +156,24 @@ async function scheduledCheck() {
   } catch (e) {
     console.error("scheduled check failed:", e);
   }
+  await refreshLeie();
+}
+
+// OIG exclusion list (pipeline/leie.ts): a 15 MB file, loaded in seconds, so it runs inline here
+// rather than through the detached NPPES runner. leie.ts exits early when the file is unchanged.
+let leieRunning = false;
+function refreshLeie(): Promise<void> {
+  if (leieRunning) return Promise.resolve();
+  leieRunning = true;
+  return new Promise((resolve) => {
+    execFile(path.join(SRC, "node_modules/.bin/tsx"), [path.join(SRC, "pipeline/leie.ts")], { timeout: 600_000 }, (err, stdout, stderr) => {
+      const out = `${stdout}${stderr}`.trim();
+      if (err) console.error(`leie check failed: ${out || err.message}`);
+      else console.log(out); // one line per check even when unchanged, so a stalled scheduler is visible
+      leieRunning = false;
+      resolve();
+    });
+  });
 }
 
 ensureTable()

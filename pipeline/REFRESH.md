@@ -13,6 +13,9 @@ returned by `GET /api/npi/{npi}`.
 Before each swap, `load.ts --diff staging` records what changed per NPI into
 `public.provider_changes`. That table is permanent history, outside the swapped schemas. It can't be
 rebuilt, so it is the one table here that must be backed up. See CHANGELOG 2026-10-07.
+
+The same 6-hourly check also runs `pipeline/leie.ts` (HHS OIG exclusion list → `public.oig_exclusions`).
+It logs one `leie:` line per check. By hand: `docker exec npiradar-refresh npx tsx pipeline/leie.ts`.
 Built 2026-05-24. See also `pipeline/README.md` (the manual pipeline) and `STATUS.md`.
 
 ## How it works

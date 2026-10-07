@@ -1,6 +1,7 @@
 import { query } from "@/lib/db";
 import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
+import { oigSection, oigTypeLabel, OIG_VERIFY_URL } from "@/lib/oig";
 
 // Single source of truth for the provider-detail row — used by the /npi/[npi] page and the
 // public /api/npi/[npi] JSON endpoint so they can't drift.
@@ -31,6 +32,7 @@ export interface ProviderRow {
   specialty_slug: string | null;
   classification: string | null;
   grouping: string | null;
+  oig_excluded: boolean; // on the HHS OIG exclusion list (pipeline/leie.ts), matched by NPI
 }
 
 export async function getProvider(npi: string): Promise<ProviderRow | null> {
@@ -43,7 +45,8 @@ export async function getProvider(npi: string): Promise<ProviderRow | null> {
             to_char(p.last_update_date,  'YYYY-MM-DD') AS last_update_date,
             to_char(p.deactivation_date, 'YYYY-MM-DD') AS deactivation_date,
             p.is_sole_proprietor, p.license_number, p.license_state,
-            t.display_name AS specialty, t.slug AS specialty_slug, t.classification, t.grouping
+            t.display_name AS specialty, t.slug AS specialty_slug, t.classification, t.grouping,
+            EXISTS (SELECT 1 FROM public.oig_exclusions e WHERE e.npi = p.npi) AS oig_excluded
        FROM providers p
        LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
       WHERE p.npi = $1`,
@@ -64,7 +67,8 @@ export async function getProviders(npis: string[]): Promise<ProviderRow[]> {
             to_char(p.last_update_date,  'YYYY-MM-DD') AS last_update_date,
             to_char(p.deactivation_date, 'YYYY-MM-DD') AS deactivation_date,
             p.is_sole_proprietor, p.license_number, p.license_state,
-            t.display_name AS specialty, t.slug AS specialty_slug, t.classification, t.grouping
+            t.display_name AS specialty, t.slug AS specialty_slug, t.classification, t.grouping,
+            EXISTS (SELECT 1 FROM public.oig_exclusions e WHERE e.npi = p.npi) AS oig_excluded
        FROM providers p
        LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
       WHERE p.npi = ANY($1::text[])`,
@@ -105,6 +109,7 @@ export function toPublicJson(p: ProviderRow) {
     lastUpdated: p.last_update_date,
     deactivationDate: p.deactivation_date,
     deactivated: p.deactivation_date != null,
+    oigExcluded: p.oig_excluded,
     source: "NPPES",
     url: `https://npiradar.com/npi/${p.npi}`,
   };
@@ -217,7 +222,7 @@ function formatStoredAddress(a: string | null): string | null {
   return [...parts.map((p) => titleCase(p)), [state, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
 }
 
-const STATUS_CHANGES = new Set(["added", "deactivated", "reactivated"]);
+const STATUS_CHANGES = new Set(["added", "deactivated", "reactivated", "oig_excluded", "oig_reinstated"]);
 
 const CHANGE_LABELS: Record<string, string> = {
   added: "Added to the registry",
@@ -229,6 +234,7 @@ const CHANGE_LABELS: Record<string, string> = {
   name: "Name changed",
   credential: "Credential changed",
   license: "License changed",
+  oig_reinstated: "Removed from the HHS OIG exclusion list",
 };
 
 /** Display-ready change, shared by the page and the API so they can't drift. */
@@ -242,9 +248,52 @@ export function describeChange(c: ProviderChange) {
   return {
     release: c.release,
     change: c.change,
-    label: c.change === "deactivated" && c.new_value ? `Deactivated, effective ${c.new_value}` : CHANGE_LABELS[c.change] ?? c.change,
+    label:
+      c.change === "deactivated" && c.new_value ? `Deactivated, effective ${c.new_value}`
+      : c.change === "oig_excluded" ? `Added to the HHS OIG exclusion list${c.new_value ? ` (${oigSection(c.new_value)}${oigTypeLabel(c.new_value) ? `: ${oigTypeLabel(c.new_value)}` : ""})` : ""}`
+      : CHANGE_LABELS[c.change] ?? c.change,
     // Status changes are their own statement; only field changes carry a from → to.
     from: STATUS_CHANGES.has(c.change) ? null : fmt(c.old_value, c.old_label),
     to: STATUS_CHANGES.has(c.change) ? null : fmt(c.new_value, c.new_label),
+  };
+}
+
+// ── HHS OIG exclusions (pipeline/leie.ts) ───────────────────────────────────────────────────────────
+// Matched by NPI only; never by name. The page must cite OIG and point to its verification search.
+
+export interface OigExclusion {
+  excl_type: string;
+  excl_date: string | null;
+  waiver_date: string | null;
+  waiver_state: string | null;
+  loaded_at: string | null; // when we last loaded the list, for "as of"
+}
+
+export async function getOigExclusions(npi: string): Promise<OigExclusion[]> {
+  if (!/^\d{10}$/.test(npi)) return [];
+  try {
+    return await query<OigExclusion>(
+      `SELECT e.excl_type, to_char(e.excl_date, 'YYYY-MM-DD') AS excl_date,
+              to_char(e.waiver_date, 'YYYY-MM-DD') AS waiver_date, e.waiver_state,
+              (SELECT to_char(max(loaded_at), 'YYYY-MM-DD') FROM public.dataset_loads WHERE dataset = 'leie') AS loaded_at
+         FROM public.oig_exclusions e WHERE e.npi = $1 ORDER BY e.excl_date`,
+      [npi],
+    );
+  } catch (e) {
+    if ((e as { code?: string }).code === "42P01") return []; // list not loaded yet
+    throw e;
+  }
+}
+
+export function oigToPublicJson(x: OigExclusion[]) {
+  if (x.length === 0) return { oigExcluded: false, oigExclusions: [] };
+  return {
+    oigExcluded: true,
+    oigExclusions: x.map((e) => ({
+      type: e.excl_type, section: oigSection(e.excl_type), description: oigTypeLabel(e.excl_type),
+      excludedSince: e.excl_date, waiverDate: e.waiver_date, waiverState: e.waiver_state,
+    })),
+    oigListAsOf: x[0].loaded_at,
+    oigSource: "HHS OIG List of Excluded Individuals/Entities (LEIE). Verify at " + OIG_VERIFY_URL,
   };
 }

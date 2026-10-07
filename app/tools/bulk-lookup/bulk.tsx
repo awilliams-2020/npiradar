@@ -14,6 +14,8 @@ interface Row {
   specialty?: string | null;
   city?: string | null;
   state?: string | null;
+  deactivated?: boolean;
+  oigExcluded?: boolean;
 }
 
 function parseNpis(text: string): string[] {
@@ -22,10 +24,10 @@ function parseNpis(text: string): string[] {
 }
 
 function toCsv(rows: Row[]): string {
-  const head = ["npi", "status", "valid", "name", "entityType", "specialty", "city", "state"];
+  const head = ["npi", "status", "valid", "name", "entityType", "specialty", "city", "state", "deactivated", "oigExcluded"];
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((r) =>
-    [r.npi, r.status, r.valid ?? "", r.name ?? "", r.entityType ?? "", r.specialty ?? "", r.city ?? "", r.state ?? ""]
+    [r.npi, r.status, r.valid ?? "", r.name ?? "", r.entityType ?? "", r.specialty ?? "", r.city ?? "", r.state ?? "", r.deactivated ?? "", r.oigExcluded ?? ""]
       .map(esc)
       .join(","),
   );
@@ -64,11 +66,13 @@ export function BulkLookup() {
         (j.results ?? []).map((p: {
           npi: string; valid?: boolean; name?: string; entityType?: string | null;
           specialty?: string | null; practiceLocation?: { city?: string; state?: string };
+          deactivated?: boolean; oigExcluded?: boolean;
         }) => [
           p.npi,
           {
             npi: p.npi, status: "ok", valid: p.valid, name: p.name, entityType: p.entityType,
             specialty: p.specialty, city: p.practiceLocation?.city, state: p.practiceLocation?.state,
+            deactivated: p.deactivated, oigExcluded: p.oigExcluded,
           } as Row,
         ]),
       );
@@ -131,7 +135,9 @@ export function BulkLookup() {
                 <td>{r.specialty ?? "—"}</td>
                 <td>{[r.city, r.state].filter(Boolean).join(", ") || "—"}</td>
                 <td>
-                  {r.status === "ok" ? <span className="badge ok">Found</span>
+                  {r.status === "ok" && r.oigExcluded ? <span className="badge bad">OIG excluded</span>
+                    : r.status === "ok" && r.deactivated ? <span className="badge bad">Deactivated</span>
+                    : r.status === "ok" ? <span className="badge ok">Found</span>
                     : r.status === "not_found" ? <span className="badge bad">Not found</span>
                     : <span className="badge bad">Error</span>}
                 </td>

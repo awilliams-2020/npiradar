@@ -5,6 +5,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — HHS OIG exclusion flags (LEIE) (2026-10-07)
+
+**Why:** OIG's exclusion list bars people and entities from federal health programs, but CMS's NPI
+registry doesn't show it: 7,724 of the 8,700 listed NPIs are still active NPIs that look clean there.
+Screening for exclusions is a monthly compliance job for billing and credentialing teams.
+
+**What changed:**
+- `pipeline/leie.ts` downloads OIG's `UPDATED.csv` (~84k rows), keeps rows with a real NPI (8,881 / 8,700
+  NPIs) into `public.oig_exclusions`, and records `oig_excluded` / `oig_reinstated` in `provider_changes`
+  (not on the first load, when everyone would read as new). Skips when the file's sha256 is unchanged
+  (`public.dataset_loads`); refuses a file under 50k rows; purges the ISR cache when the list changed.
+- **NPI match only, never by name.** A wrong exclusion flag is the one error this can't afford.
+- `refresh-server.ts` runs it on the same 6-hourly check (inline; it takes seconds).
+- `/npi/[npi]`: banner citing the OIG section and date, "as of" the load date, and a link to OIG's own
+  search to confirm. `GET /api/npi/{npi}`: `oigExcluded`, `oigExclusions[]`, `oigListAsOf`, `oigSource`.
+  Bulk `POST /api/npi` and `/tools/bulk-lookup` (table + CSV) carry `oigExcluded` and `deactivated`.
+- `pipeline/lib/changes.ts` holds the `provider_changes` DDL shared by `load.ts` and `leie.ts`.
+
 ### Added — Registry history: month-over-month change log (2026-10-07)
 
 **Why:** NPPES publishes only each provider's current record. History exists only if someone keeps it,

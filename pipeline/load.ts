@@ -28,6 +28,7 @@ import { parse } from "csv-parse";
 import pg from "pg";
 import { from as copyFrom } from "pg-copy-streams";
 import { mapRow, buildColIndex, toCopyLine, loadTaxonomyRows, PROVIDER_COLUMNS, type ColIndex } from "./lib/provider.ts";
+import { PROVIDER_CHANGES_DDL } from "./lib/changes.ts";
 
 const args = process.argv.slice(2);
 const flag = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
@@ -268,16 +269,7 @@ async function finalize(client: pg.Client) {
  */
 async function doDiff(client: pg.Client, schema: string, against: string) {
   const s = qIdent(schema), live = qIdent(against);
-  await client.query(`CREATE TABLE IF NOT EXISTS public.provider_changes (
-    release date NOT NULL,
-    npi text NOT NULL,
-    change text NOT NULL,      -- added | removed | deactivated | reactivated | practice_address | practice_phone
-                               -- | primary_taxonomy | name | credential | license
-    old_value text,
-    new_value text,
-    PRIMARY KEY (npi, release, change)
-  )`);
-  await client.query(`CREATE INDEX IF NOT EXISTS idx_provider_changes_release ON public.provider_changes (release, change)`);
+  await client.query(PROVIDER_CHANGES_DDL);
 
   const rel = await client.query<{ new_rel: string | null; old_rel: string | null; has_live: boolean }>(`
     SELECT (SELECT max(last_update_date)::text FROM ${s}.providers) AS new_rel,
