@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { searchProviders } from "@/lib/facets";
+import { searchProviders, specialtySlugForCode, TAXONOMY_CODE_RE } from "@/lib/facets";
 import { ProviderList } from "@/app/_components/facet";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   // A 10-digit NPI goes straight to the provider page (the dominant "npi number lookup" case).
   if (/^\d{10}$/.test(q)) redirect(`/npi/${q}`);
+  // A NUCC taxonomy code (207Q00000X) goes to its specialty page.
+  if (TAXONOMY_CODE_RE.test(q)) {
+    const slug = await specialtySlugForCode(q);
+    if (slug) redirect(`/specialty/${slug}`);
+  }
 
   const results = q.length >= 2 ? await searchProviders(q, 50) : [];
 
@@ -23,7 +28,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     <>
       <h1>Search providers</h1>
       <form className="search" action="/search">
-        <input name="q" defaultValue={q} placeholder="NPI number or last name" aria-label="Search" />
+        <input name="q" defaultValue={q} placeholder="NPI number, last name, or taxonomy code" aria-label="Search" />
         <button type="submit">Search</button>
       </form>
 

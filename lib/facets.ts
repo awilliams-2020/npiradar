@@ -80,14 +80,37 @@ const LIST_COLS = `p.npi, p.entity_type, p.org_name, p.first_name, p.middle_name
 const LIST_ORDER = `ORDER BY p.last_name NULLS LAST, p.org_name NULLS LAST, p.npi`;
 
 // ---- specialty ---------------------------------------------------------------
-export interface Specialty { slug: string; display_name: string; grouping: string | null; n: number }
+export interface Specialty {
+  slug: string; display_name: string; grouping: string | null; n: number;
+  codes: string[]; // NUCC taxonomy codes behind this page (one today; the slug scheme allows several)
+  definition: string | null; // NUCC's definition, when the page has exactly one code and NUCC wrote one
+}
 
 export async function getSpecialty(slug: string): Promise<Specialty | null> {
-  const r = await query<{ slug: string; display_name: string; grouping: string | null; n: string }>(
-    `SELECT slug, display_name, grouping, n::text AS n FROM mv_specialty_counts WHERE slug = $1`,
+  const r = await query<{ slug: string; display_name: string; grouping: string | null; n: string; codes: string[]; definitions: (string | null)[] }>(
+    `SELECT m.slug, m.display_name, m.grouping, m.n::text AS n,
+            array_agg(t.code ORDER BY t.code) AS codes, array_agg(t.definition ORDER BY t.code) AS definitions
+       FROM mv_specialty_counts m JOIN taxonomy t ON t.slug = m.slug
+      WHERE m.slug = $1
+      GROUP BY m.slug, m.display_name, m.grouping, m.n`,
     [slug],
   );
-  return r[0] ? { ...r[0], n: Number(r[0].n) } : null;
+  if (!r[0]) return null;
+  const { definitions, ...s } = r[0];
+  return { ...s, n: Number(s.n), definition: definitions.length === 1 ? definitions[0] : null };
+}
+
+/** NUCC taxonomy code shape: 10 characters, the last always "X" (207Q00000X). */
+export const TAXONOMY_CODE_RE = /^[0-9A-Z]{9}X$/i;
+
+/** Specialty page slug for a taxonomy code, or null if unknown or it has no active providers (no page). */
+export async function specialtySlugForCode(code: string): Promise<string | null> {
+  if (!TAXONOMY_CODE_RE.test(code)) return null;
+  const r = await query<{ slug: string }>(
+    `SELECT m.slug FROM taxonomy t JOIN mv_specialty_counts m ON m.slug = t.slug WHERE t.code = $1`,
+    [code.toUpperCase()],
+  );
+  return r[0]?.slug ?? null;
 }
 
 export async function specialtyCodes(slug: string): Promise<string[]> {
@@ -205,7 +228,7 @@ export async function searchProvidersApi(
 }
 
 // ---- sibling / index links (crawl graph) -------------------------------------
-export interface SlugCount { slug: string; name: string; n: number }
+export interface SlugCount { slug: string; name: string; n: number; code?: string }
 export interface CityRef { state: string; city_slug: string; city_name: string; n: number }
 
 export async function topSpecialties(limit: number): Promise<SlugCount[]> {
@@ -215,8 +238,10 @@ export async function topSpecialties(limit: number): Promise<SlugCount[]> {
 }
 
 export async function allSpecialties(): Promise<SlugCount[]> {
-  const r = await query<{ slug: string; name: string; n: string }>(
-    `SELECT slug, display_name AS name, n::text AS n FROM mv_specialty_counts ORDER BY display_name`);
+  const r = await query<{ slug: string; name: string; n: string; code: string }>(
+    `SELECT m.slug, m.display_name AS name, m.n::text AS n, string_agg(t.code, ', ' ORDER BY t.code) AS code
+       FROM mv_specialty_counts m JOIN taxonomy t ON t.slug = m.slug
+      GROUP BY m.slug, m.display_name, m.n ORDER BY m.display_name`);
   return r.map((x) => ({ ...x, n: Number(x.n) }));
 }
 

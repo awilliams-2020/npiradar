@@ -71,7 +71,7 @@ DROP TABLE IF EXISTS provider_other_names, provider_locations, provider_endpoint
 
 CREATE UNLOGGED TABLE taxonomy (
   code text PRIMARY KEY, grouping text, classification text,
-  specialization text, display_name text, section text
+  specialization text, display_name text, section text, definition text
 );
 
 -- no PK / indexes during bulk load; added in --finalize
@@ -142,9 +142,9 @@ const finish = (s: NodeJS.WritableStream): Promise<void> =>
 async function loadTaxonomy(client: pg.Client): Promise<number> {
   if (!taxonomyPath) return 0;
   const rows = loadTaxonomyRows(taxonomyPath);
-  const stream = client.query(copyFrom(`COPY taxonomy (code, grouping, classification, specialization, display_name, section) FROM STDIN`));
+  const stream = client.query(copyFrom(`COPY taxonomy (code, grouping, classification, specialization, display_name, section, definition) FROM STDIN`));
   const esc = (v: string) => (v === "" ? "\\N" : v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t"));
-  for (const r of rows) await write(stream, [r.code, r.grouping, r.classification, r.specialization, r.display_name, r.section].map(esc).join("\t") + "\n");
+  for (const r of rows) await write(stream, [r.code, r.grouping, r.classification, r.specialization, r.display_name, r.section, r.definition].map(esc).join("\t") + "\n");
   await finish(stream);
   return rows.length;
 }

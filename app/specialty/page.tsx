@@ -8,10 +8,10 @@ import { Breadcrumbs } from "@/app/_components/facet";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Medical Specialties Directory — NPI Lookup by Specialty",
+  title: "Medical Specialties & Taxonomy Codes — NPI Lookup by Specialty",
   description:
-    "Browse US healthcare providers by specialty, from physicians and dentists to nurses and therapists. " +
-    "Every NUCC provider taxonomy with its active NPI count in the public NPPES registry.",
+    "Every NUCC provider taxonomy code with its specialty name and active NPI count in the public NPPES " +
+    "registry, from physicians and dentists to nurses and therapists.",
   alternates: { canonical: "/specialty" },
 };
 
@@ -23,13 +23,14 @@ export default async function SpecialtyIndex() {
       <h1>Browse providers by specialty</h1>
       <p className="sub">
         {specialties.length.toLocaleString()} provider specialties (NUCC taxonomy) with active NPIs in the
-        NPPES registry. Pick a specialty to see providers and drill down by city.
+        NPPES registry, each with its taxonomy code. Pick a specialty to see providers and drill down by city,
+        or search a code like 207Q00000X.
       </p>
       <ul className="plist">
         {specialties.map((s) => (
           <li key={s.slug}>
             <Link href={`/specialty/${s.slug}`}>{s.name}</Link>
-            <span className="meta">{s.n.toLocaleString()} providers</span>
+            <span className="meta">{s.code ? `${s.code} · ` : ""}{s.n.toLocaleString()} providers</span>
           </li>
         ))}
       </ul>

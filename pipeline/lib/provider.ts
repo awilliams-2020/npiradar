@@ -167,7 +167,7 @@ export function toCopyLine(p: Provider): string {
 }
 
 // ---- NUCC taxonomy ----------------------------------------------------------
-export interface TaxoRow { code: string; grouping: string; classification: string; specialization: string; display_name: string; section: string }
+export interface TaxoRow { code: string; grouping: string; classification: string; specialization: string; display_name: string; section: string; definition: string }
 
 /** Read the NUCC taxonomy CSV into typed rows (small file — sync is fine). */
 export function loadTaxonomyRows(path: string): TaxoRow[] {
@@ -179,6 +179,8 @@ export function loadTaxonomyRows(path: string): TaxoRow[] {
     specialization: r["Specialization"] ?? "",
     display_name: r["Display Name"] || r["Classification"] || "",
     section: r["Section"] ?? "",
+    // 216 of 883 codes carry this placeholder rather than a definition; store none instead.
+    definition: /^Definition to come/i.test(r["Definition"] ?? "") ? "" : (r["Definition"] ?? "").trim(),
   }));
 }
 
