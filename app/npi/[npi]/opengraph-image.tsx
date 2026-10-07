@@ -6,9 +6,10 @@ export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 export const alt = "Healthcare provider on NPIRadar";
 
-// Cache the rendered card (ISR). Satori renders are CPU-bound and single-threaded, so under crawler
-// bursts many concurrent renders serialize and the tail latency balloons (seen: ~6.5s). NPPES data
-// changes ~monthly, so serve a cached PNG for a week; first hit per NPI renders, the rest are free.
+// Meant to cache the rendered card: Satori renders are CPU-bound and single-threaded, so under crawler
+// bursts concurrent renders serialize and tail latency balloons (seen: ~6.5s). But like the page, this
+// dynamic route has no generateStaticParams, so the server renders it on every request (~110 ms,
+// 2026-10-07); `revalidate` has no effect. Clients and crawlers do get `immutable, max-age=31536000`.
 export const revalidate = 604800;
 
 export default async function Image({ params }: { params: Promise<{ npi: string }> }) {

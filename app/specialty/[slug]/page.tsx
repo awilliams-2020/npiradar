@@ -6,8 +6,9 @@ import {
 } from "@/lib/facets";
 import { Breadcrumbs, ProviderList, Pager, LinkChips, moneyLinks } from "@/app/_components/facet";
 
-export const revalidate = 2592000; // 30d, matches the monthly NPPES refresh
-export const dynamicParams = true; // render any specialty on first request, then cache
+// Rendered on every request (it reads ?page=, and has no generateStaticParams), so `revalidate` has no effect.
+export const revalidate = 2592000;
+export const dynamicParams = true;
 
 type SP = Promise<{ [k: string]: string | string[] | undefined }>;
 const pageNum = (sp: { page?: string | string[] }) => {

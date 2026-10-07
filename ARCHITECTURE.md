@@ -92,16 +92,20 @@ appended for readability (`/npi/1234567890/jane-smith`) but the bare `/npi/{npi}
 
 ## 4. Rendering strategy (the scale decision)
 
-**On-demand ISR, not build-time SSG.** Pre-rendering 8M pages at build is infeasible for a solo dev (multi-hour
-builds, enormous deploys). Instead:
+**Per-request rendering, not ISR or build-time SSG** (corrected 2026-10-07). Pre-rendering 8M pages at build
+is infeasible for a solo dev (multi-hour builds, enormous deploys). The plan was on-demand ISR, but it never took
+effect, and it now stays off on purpose:
 
-- Next.js App Router route segments with `export const revalidate = <monthly>` and **`generateStaticParams`
-  returning only a small seed set** (top specialties/cities) — everything else renders **on first request**,
-  then is cached.
-- **ISR caches the rendered HTML on-box** (`.next/cache`). First crawler/visitor triggers a render; subsequent hits
-  are served from that cache. There is no CDN in front.
-- Revalidate cadence ties to the **monthly NPPES refresh** — on new data load, bump a global cache version
-  (or purge by tag) so pages re-render with fresh data.
+- Provider, specialty, specialty×city, state and city pages, and their OG images, **render on every request**.
+  They set `revalidate`, but none defines `generateStaticParams`, and Next 15 doesn't ISR a dynamic route
+  without one, so the setting does nothing. Responses carry `cache-control: no-store`.
+- Measured 2026-10-07: provider pages ~21 ms p50 / 64 ms p99 at ~22k hits/h (mostly crawlers); city pages
+  ~460 ms; OG cards ~110 ms. Caching ~9M provider pages would write each one to disk as it's crawled
+  (tens of KB of HTML + RSC apiece), against 305 GB free, to save ~20 ms.
+- So data is always live: a load is visible on the next request, with **no purge needed**. `/api/revalidate`
+  only refreshes the genuinely static pages (`/about`, `/nppes`, the tools), which revalidate daily anyway.
+- If this is ever revisited: add `generateStaticParams() { return [] }` to the route, then a data load must purge
+  the affected paths (`revalidatePath('/npi/<npi>')`), and disk growth needs a bound.
 - Detail pages are discovered via **sitemaps + facet interlinking** (§5), not pre-render.
 
 This is the standard pSEO-at-scale pattern and keeps hosting on the existing single box.

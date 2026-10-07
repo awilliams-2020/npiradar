@@ -11,7 +11,7 @@
  * Called by refresh-server.ts on its 6-hourly check. By hand:
  *   docker exec npiradar-refresh npx tsx pipeline/leie.ts
  *
- * Env: DATABASE_URL; optional REFRESH_SECRET + APP_INTERNAL_URL to purge the ISR cache after a change.
+ * Env: DATABASE_URL; optional REFRESH_SECRET + APP_INTERNAL_URL to purge the cached static pages after a change.
  */
 import crypto from "node:crypto";
 import { parse } from "csv-parse/sync";
@@ -95,7 +95,7 @@ async function main() {
     console.log(`leie: loaded ${rows.length} NPI rows of ${all.length} (${sha.slice(0, 12)})` +
       (firstLoad ? " — first load, no history recorded" : `; +${added} excluded, -${removed} reinstated`));
 
-    // Provider pages cache for 30 days; purge so the flags show now. Same call the NPPES refresh makes.
+    // Provider pages render per request and show the flags at once; this refreshes the cached static pages.
     const secret = process.env.REFRESH_SECRET, app = process.env.APP_INTERNAL_URL;
     if (secret && app && (firstLoad || added || removed)) {
       const rv = await fetch(`${app}/api/revalidate`, { method: "POST", headers: { authorization: `Bearer ${secret}` } }).catch((e) => e);

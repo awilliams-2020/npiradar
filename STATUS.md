@@ -4,7 +4,7 @@ A point-in-time picture of what is **actually built, loaded, and serving** — d
 `IMPLEMENTATION.md`. Update this when the state materially changes; it's the fastest way to re-orient.
 
 > TL;DR: The full NPPES monthly is loaded (9.55M rows) and the site is **live behind Traefik**, serving the
-> home page and provider-detail pages via ISR. The **ranking surface is not built yet** — no sitemap, no facet
+> home page and provider-detail pages, rendered per request (no ISR; see `ARCHITECTURE.md` §4). The **ranking surface is not built yet** — no sitemap, no facet
 > pages, no search route, no internal linking. Those are the next body of work (see `SEO.md`).
 
 ---
@@ -18,7 +18,7 @@ A point-in-time picture of what is **actually built, loaded, and serving** — d
 | **TLS** | **Live Let's Encrypt cert (2026-05-24)** — `certresolver=default` (HTTP-01), SAN `npiradar.com` + `www.npiradar.com`, valid to 2026-08-22. HTTP→HTTPS 301. (Note: combined cert fails atomically if any SAN's DNS is missing — `www` must resolve before issuance.) |
 | **Database** | Shared `postgres` container (TimescaleDB pg15), host port **5433**, db **`npiradar`**, creds `postgres:<password>`. App reaches it in-network at `postgres:5432`; host-run pipeline uses `localhost:5433`. |
 | **Deploy layout** | `~/projects/npiradar/` = `docker-compose.yml` + `.env`; `~/npiradar/` = source + `Dockerfile`. ([[deploy-convention-traefik-compose]]) |
-| **CDN** | **Not in front yet.** Cloudflare is planned to cache rendered HTML by URL; until the domain is live, ISR + the container's `.next/cache` is the only caching layer. |
+| **CDN** | **Not in front yet.** Cloudflare is planned to cache rendered HTML by URL; there is no page cache: provider and facet pages render per request (`ARCHITECTURE.md` §4). |
 
 Rebuild & redeploy:
 ```bash
@@ -56,12 +56,12 @@ search); and three materialized views — `mv_specialty_counts` (870), `mv_city_
 |---|---|---|
 | `/` | `force-dynamic`, 1-day count cache | head-term title/desc, canonical, OG/Twitter, "What is an NPI?" block, internal links to top specialties/cities, working search form |
 | `/search?q=` | `force-dynamic`, `noindex` | NPI (10 digits) → 307 to `/npi/{npi}`; else name prefix search (last/org name) |
-| `/npi/[npi]` | ISR 30d, `dynamicParams` | title/desc, canonical, JSON-LD `Physician`/`MedicalOrganization` + `BreadcrumbList`, validity badge, `noindex` on deactivated, **internal links to its specialty/city/specialty×city** |
+| `/npi/[npi]` | per request, `dynamicParams` | title/desc, canonical, JSON-LD `Physician`/`MedicalOrganization` + `BreadcrumbList`, validity badge, `noindex` on deactivated, **internal links to its specialty/city/specialty×city** |
 | `/specialty` | `force-dynamic` | index of all 870 specialties |
-| `/specialty/[slug]` | ISR 30d, `dynamicParams` | title/desc, canonical, `ItemList`+`BreadcrumbList` JSON-LD, paginated, links to top cities (money pages) |
-| `/specialty/[slug]/[citystate]` | ISR 30d, `dynamicParams` | **money page**; `noindex` if <5 providers or page >10; sibling links (other specialties in city, same specialty other cities) |
-| `/in/[state]` | ISR 30d, `dynamicParams` | state → city index (US states only) |
-| `/in/[state]/[city]` | ISR 30d, `dynamicParams` | city page; `ItemList`+`BreadcrumbList`, links to specialties-in-city + other cities |
+| `/specialty/[slug]` | per request, `dynamicParams` | title/desc, canonical, `ItemList`+`BreadcrumbList` JSON-LD, paginated, links to top cities (money pages) |
+| `/specialty/[slug]/[citystate]` | per request, `dynamicParams` | **money page**; `noindex` if <5 providers or page >10; sibling links (other specialties in city, same specialty other cities) |
+| `/in/[state]` | per request, `dynamicParams` | state → city index (US states only) |
+| `/in/[state]/[city]` | per request, `dynamicParams` | city page; `ItemList`+`BreadcrumbList`, links to specialties-in-city + other cities |
 | `/tools/npi-validator` | static + client component | client-side check-digit validator (link magnet), explainer content |
 | `/tools/bulk-lookup` | static + client component | paste ≤100 NPIs → table + CSV export; consumes the public API |
 | `/api/npi/[npi]` | route handler, CORS-open | public JSON provider lookup (200/404/400); backlink magnet + freemium-API seed |
@@ -80,12 +80,11 @@ Most of the SEO surface is built. Remaining:
 
 - **Go-live progress:** ✅ domain registered, ✅ DNS (apex + www → 46.110.4.68), ✅ real Let's Encrypt TLS live.
   **Remaining: submit `/sitemap.xml` to Google Search Console** (verify the domain property, then add the sitemap).
-  Cloudflare **deliberately deferred** — Next ISR already caches rendered pages on-box, and Traefik `ratelimit` +
+  Cloudflare **deliberately deferred** — pages render in ~21 ms uncached, and Traefik `ratelimit` +
   CrowdSec cover abuse; a CDN's edge/bandwidth/DDoS role isn't needed at zero traffic. Add later (with a
   Cloudflare Origin Cert or DNS-01, so it doesn't break Let's Encrypt) only if crawl load / bandwidth justifies it.
-- **Monthly refresh cache-bust** — handled by `pipeline/refresh.sh` (load + `--force-recreate`). Note: a plain
-  `docker restart` does **not** clear `.next/cache` (ISR), so use the script / `--force-recreate`. Weekly
-  incrementals + deactivation-file handling still not wired (monthly full replace only).
+- **Monthly refresh** — provider and facet pages render per request, so a load shows at once with no cache-bust.
+  Weekly incrementals + deactivation-file handling still not wired (monthly full replace only).
 - **Deep-pagination & search depth** — facet pagination is capped at 10 indexable pages; name search is whole-string
   prefix only (no fuzzy/multi-token). Both fine for v1.
 - **Not built:** name slugs on provider URLs (bare NPI stays canonical); per-page dynamic OG images (one default card

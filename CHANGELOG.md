@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Docs claimed provider pages were ISR-cached for 30 days; they never were (2026-10-07)
+
+Provider, specialty and city pages (and their OG images) set `revalidate` but have no
+`generateStaticParams`, and Next 15 doesn't ISR a dynamic route without one: they render on every
+request (`cache-control: no-store`). Measured: ~21 ms p50 / 64 ms p99 at ~22k provider hits/h. Kept that
+way on purpose: caching ~9M pages would write each to disk as it's crawled, to save ~20 ms. Data loads
+therefore show on the next request with no purge. Corrected in `ARCHITECTURE.md` §4 (the canonical
+note), STATUS, README, SEO, IMPLEMENTATION, `pipeline/README.md`, `REFRESH.md` and the code comments.
+
 ### Added — Medicare enrollment, order & referral eligibility, opt-out (2026-10-07)
 
 **Why:** "can this NPI bill or order for Medicare?" is a check billing teams run on every claim, and CMS

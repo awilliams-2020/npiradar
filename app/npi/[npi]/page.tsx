@@ -19,8 +19,12 @@ import { stateName, STATE_NAMES } from "@/lib/states";
 import { Breadcrumbs, LinkChips } from "@/app/_components/facet";
 import { oigSection, oigTypeLabel, OIG_VERIFY_URL } from "@/lib/oig";
 
-export const revalidate = 2592000; // 30d — matches the monthly NPPES refresh cadence
-export const dynamicParams = true; // render any NPI on first request, then cache (ISR at 8M scale)
+// Rendered on every request, NOT cached: without generateStaticParams, Next 15 doesn't ISR a dynamic
+// route, so `revalidate` here has no effect. Deliberate since 2026-10-07: ~21 ms p50 at ~22k hits/h,
+// and caching ~9M pages would write them all to disk as they're crawled. Data is therefore always live;
+// no purge is needed after a load.
+export const revalidate = 2592000;
+export const dynamicParams = true;
 
 const usdWhole = (s: string) => Number(s).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 

@@ -167,7 +167,7 @@ Google penalizes thin/doorway directories — the #1 risk here.
     lands on it, Google retries instead of de-indexing. **Watch:** Googlebot getting 503s in the traefik
     log means the IP list is stale; `/api/` is now the open door if the scraper looks for one.
   Once facets exist, consider disallowing `/search?` (faceted query noise) and any infinite-pagination traps.
-- **TLS / CDN** — real Let's Encrypt TLS via Traefik. **No Cloudflare**; ISR's on-box cache is the only caching layer.
+- **TLS / CDN** — real Let's Encrypt TLS via Traefik. **No Cloudflare** and no page cache: pages render per request (`ARCHITECTURE.md` §4).
 - **Core Web Vitals** — pages are server-rendered, minimal CSS, no client JS framework weight beyond Next runtime;
   in good shape. Keep provider pages light.
 - **Freshness** — `DATA_VINTAGE` in the footer + `lastmod` in sitemaps signal recency; wire up cache-busting on
@@ -198,7 +198,7 @@ Each step is independently shippable. Current status in brackets.
 3. **`/search`** — `[x]` **Done** — `/search?q=` redirects 10-digit NPIs to `/npi/{npi}`, else prefix name search
    over the partial `last_name`/`org_name` indexes. Fixes the broken home form. (`/api/search` JSON endpoint deferred.)
 4. **Facet pages** — `[x]` **Done** — `/specialty`, `/specialty/[slug]`, `/in/[state]`, `/in/[state]/[city]`
-   (paginated, ISR, `ItemList`, intros, canonical, pagination-depth `noindex`).
+   (paginated, `ItemList`, intros, canonical, pagination-depth `noindex`).
 5. **Internal linking** — `[x]` **Done** — provider→specialty/city/specialty×city, facet→siblings + nearby,
    `BreadcrumbList` on every deep page, header nav, home links to top specialties/cities.
 6. **Money pages** — `[x]` **Done** — `/specialty/[slug]/[citystate]` from `mv_specialty_city_counts`; rendered
@@ -207,7 +207,7 @@ Each step is independently shippable. Current status in brackets.
    explainer. (Name slugs on `/npi` URLs still deferred — bare NPI stays canonical.)
 8. **Validator tool** `/tools/npi-validator` — `[x]` **Done** — client-side check-digit validation + explainer.
 9. **Go live** — register domain ✅, DNS ✅, real Let's Encrypt TLS ✅ (`certresolver=default`, 2026-05-24).
-   Cloudflare **deferred** (ISR caches on-box; not needed at zero traffic). **Remaining: submit `/sitemap.xml` to
+   Cloudflare **deferred** (not needed at this traffic). **Remaining: submit `/sitemap.xml` to
    Google Search Console** — the last step, and now the only thing between this and ranking.
 
 **Post-launch enhancements (done 2026-05-24):**
@@ -216,7 +216,7 @@ Each step is independently shippable. Current status in brackets.
 - **OG images** — default branded card (`app/opengraph-image.tsx`) plus **per-page** cards for provider / specialty /
   money / city pages (`app/_og/card.tsx` + `opengraph-image.tsx` in each route), `summary_large_image`.
 - **Radar favicon** — `app/icon.svg` (shows in tabs + Google SERP).
-- **Monthly-refresh cache-bust** — `pipeline/refresh.sh` (load + `--force-recreate`, since `restart` won't clear ISR).
+- **Monthly refresh** — pages render per request, so new data shows at once; no cache-bust needed.
 - **Copy pass** — stripped AI-isms (em-dash overuse, repeated "from the public NPPES registry" tagline, cloned triads)
   per [[copy-no-ai-smell]]; nav spacing + breadcrumb/mobile styling fixes.
 

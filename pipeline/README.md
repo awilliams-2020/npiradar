@@ -128,12 +128,9 @@ It runs `load.ts` (which rebuilds providers + taxonomy + the facet MVs via `face
 4. Bump the data-vintage string: `lib/format.ts → DATA_VINTAGE` (footer + freshness signal), then redeploy
    (`docker compose up -d --build`) so the new string ships.
 
-> ### Why `--force-recreate`, not `restart`
-> Provider/facet pages use ISR `revalidate = 30d`; that render cache lives in the container's writable layer at
-> `.next/cache`. `docker restart` **reuses** that layer, so stale pages would persist up to 30 days — a plain
-> restart is *not* enough. `up -d --force-recreate` starts a fresh container with an empty `.next/cache`, so every
-> page re-renders against the new data on first hit. (In-memory caches — home count, sitemap index — clear on any
-> restart.) `refresh.sh` does the recreate for you.
+> ### No cache-bust needed for provider/facet pages
+> They render per request (`ARCHITECTURE.md` §4), so the new data shows on the next hit after the swap.
+> In-memory caches (home count, sitemap index) clear on any restart; `refresh.sh` still recreates the container.
 >
 > Still not wired up: weekly incrementals + the deactivation file (monthly full replace is the only path), and a
 > CDN purge (none needed while there's no CDN — see `SEO.md` on why Cloudflare is deferred).

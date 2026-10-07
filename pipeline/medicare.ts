@@ -21,7 +21,7 @@
  *   docker exec npiradar-refresh npx tsx pipeline/medicare.ts            # every dataset, if changed
  *   docker exec npiradar-refresh npx tsx pipeline/medicare.ts opt_out    # just these
  *
- * Env: DATABASE_URL; optional REFRESH_SECRET + APP_INTERNAL_URL to purge the ISR cache after a change.
+ * Env: DATABASE_URL; optional REFRESH_SECRET + APP_INTERNAL_URL to purge the cached static pages after a change.
  */
 import { Readable } from "node:stream";
 import { parse } from "csv-parse";
@@ -247,7 +247,7 @@ async function main() {
     await client.end();
   }
 
-  // Provider pages cache for 30 days; purge so the new status shows now. Same call leie.ts makes.
+  // Provider pages render per request and show the new status at once; this refreshes the cached static pages.
   const secret = process.env.REFRESH_SECRET, app = process.env.APP_INTERNAL_URL;
   if (changed && secret && app) {
     const rv = await fetch(`${app}/api/revalidate`, { method: "POST", headers: { authorization: `Bearer ${secret}` } }).catch((e) => e);

@@ -34,7 +34,7 @@ cron-job.org  --(monthly POST, Bearer secret)-->  https://npiradar.com/internal/
                                                    refresh-run.sh
         1. fetch-monthly.sh        resolve+download+unzip the latest CMS monthly zip
         2. load-parallel.ts        load into the `staging` schema, then ATOMIC swap → `live`
-        3. POST /api/revalidate    purge the app's ISR cache (live data already serving)
+        3. POST /api/revalidate    refresh the cached static pages (provider pages render per request)
         4. cleanup                 delete the previous month's CSV
 ```
 
@@ -96,5 +96,5 @@ curl -s -H "Authorization: Bearer $SECRET" https://npiradar.com/internal/status 
 ## Security notes
 
 - The only public surface is `/internal/*` behind the bearer secret (`/healthz` is unauthed but leaks
-  nothing). No docker socket is mounted — the ISR purge is an authed HTTP call, not a container recreate.
+  nothing). No docker socket is mounted — the cache purge is an authed HTTP call, not a container recreate.
 - Optional hardening: add a Traefik `IPAllowList` middleware for cron-job.org's published IP ranges.

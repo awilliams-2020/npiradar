@@ -38,10 +38,10 @@ Smallest thing Google can index.
       deactivation captured, indexes built. ~23 min single-process. Registry is ~9.5M now, not ~8M.
 - [ ] Materialized views for facet counts (`mv_specialty_counts`, `mv_city_counts`, `mv_specialty_city_counts`).
 - [~] Next.js 15 App Router app (`output: standalone`), merged into `~/npiradar/`:
-  - [x] `/npi/[npi]` provider detail (ISR `revalidate` 30d, `dynamicParams`) + JSON-LD `Physician`/`MedicalOrganization`,
+  - [x] `/npi/[npi]` provider detail (per request, `dynamicParams`; the planned ISR never took effect, `ARCHITECTURE.md` §4) + JSON-LD `Physician`/`MedicalOrganization`,
         NPI check-digit badge, `noindex` on deactivated. Facet query hits `idx_providers_state_taxonomy` in <1ms.
   - [x] Home (`force-dynamic`, live registry count) + `not-found` + `robots.txt`.
-  - [ ] `/specialty/[slug]` and `/in/[state]/[city]` facet pages (paginated, ISR).
+  - [ ] `/specialty/[slug]` and `/in/[state]/[city]` facet pages (paginated).
   - [ ] Provider search box → `/api/search` (Postgres trigram on name). (Home form posts to `/search` — route TODO.)
   - [ ] sitemap **index** + provider/facet child sitemaps (route handlers, generated from DB).
 - [x] Dockerfile (Next standalone) + `~/projects/npiradar/docker-compose.yml` + Traefik labels for `npiradar.com`.
@@ -51,7 +51,7 @@ Smallest thing Google can index.
       **Gotcha fixed:** the standalone runner must own `.next/cache` (`mkdir -p .next/cache && chown nextjs`) or
       ISR/`unstable_cache` writes fail with EACCES — see [[th3-sh0p-snapshot-serving-gotcha]] for the sibling lesson.
 - [ ] Register `npiradar.com` + point Cloudflare at the server; then real TLS + submit sitemap to GSC.
-- **Exit criteria:** live on `npiradar.com`, provider + facet pages rendering via ISR, sitemap submitted.
+- **Exit criteria:** live on `npiradar.com`, provider + facet pages rendering, sitemap submitted.
 
 ## Phase 2 — Interlinking + facets at scale ⏱ ~2-3 sessions
 

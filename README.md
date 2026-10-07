@@ -32,10 +32,10 @@ Full research trail (all rounds, every GO/NO-GO verdict): `~/project-research/re
 
 | Layer | Choice | Why |
 |---|---|---|
-| Framework | **Next.js (App Router, `output: standalone`)** | On-demand ISR renders millions of pages without pre-building; matches existing Traefik/compose deploy (theqrcode, balance) |
+| Framework | **Next.js (App Router, `output: standalone`)** | Renders millions of pages per request without pre-building (no ISR; `ARCHITECTURE.md` §4); matches existing Traefik/compose deploy (theqrcode, balance) |
 | Data store | **PostgreSQL** | 8M+ rows, faceted queries, trigram name search; COPY-load from NPPES CSV |
 | Search | Postgres trigram (MVP) → Meilisearch/Typesense (optional later) | Provider name autocomplete |
-| CDN / cache | **None** — Next ISR `.next/cache` on-box | Traefik terminates TLS and serves every request directly; no Cloudflare |
+| CDN / cache | **None** — pages render per request (~21 ms p50) | Traefik terminates TLS and serves every request directly; no Cloudflare |
 | Analytics | **Matomo site 9** (matomo.redbudway.com), JS-only | `app/_components/matomo.tsx`. JS-only on purpose: the scraper never runs JS, so Matomo counts real people. Audit: `docker exec -e IDSITE=9 -i th3-sh0p node - < ~/scripts/seo/matomo-audit.cjs` |
 | API usage | **`public.api_usage`** (Postgres), daily rollup | `lib/usage.ts`, written from the shared API guard. Matomo can't see API calls (no JS), so this is the only long-lived record. See **API usage** below. |
 | Deploy | Traefik + docker-compose | Per `~/projects/<name>` (compose+env) / `~/npiradar` (source+Dockerfile) convention |
@@ -82,7 +82,7 @@ only real signal of paid-tier demand. One-off hits are people or bots poking the
 - [x] Direction + domain chosen (`npiradar.com`)
 - [ ] Domain registered (user)
 - [ ] Phase 0: NPPES data spike (download + load sample → Postgres)
-- [ ] Phase 1: MVP pages + ISR + deploy
+- [ ] Phase 1: MVP pages + deploy
 - See `IMPLEMENTATION.md` for the full plan.
 
 ## Data & ethics note

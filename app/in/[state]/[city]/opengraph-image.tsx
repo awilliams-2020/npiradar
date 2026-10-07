@@ -6,7 +6,7 @@ export const size = OG_SIZE;
 export const contentType = OG_CONTENT_TYPE;
 export const alt = "City provider directory on NPIRadar";
 
-// Cache the rendered card (ISR) — see note in app/npi/[npi]/opengraph-image.tsx.
+// Rendered per request, not cached; see the note in app/npi/[npi]/opengraph-image.tsx.
 export const revalidate = 604800;
 
 export default async function Image({ params }: { params: Promise<{ state: string; city: string }> }) {
