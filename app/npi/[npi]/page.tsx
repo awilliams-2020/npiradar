@@ -6,7 +6,8 @@ import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
 import {
   getProvider as getProviderUncached, getProviderExtras, getProviderChanges,
-  getOigExclusions as getOigUncached, getOpenPayments as getOpUncached, describeChange, OTHER_NAME_TYPES, type ProviderRow,
+  getOigExclusions as getOigUncached, getOpenPayments as getOpUncached, getMedicare, describeChange, OTHER_NAME_TYPES,
+  ORDER_REFER_PROGRAMS, type ProviderRow, type Medicare,
 } from "@/lib/provider";
 
 // generateMetadata and the page both need these; cache() makes it one query per render.
@@ -42,6 +43,7 @@ export async function generateMetadata({ params }: { params: Promise<{ npi: stri
   // Lead the description with the facts CMS's registry doesn't show: an exclusion, then industry payments.
   const facts = [
     oig.length > 0 ? "On the HHS OIG exclusion list." : null,
+    p.medicare_opted_out ? "Opted out of Medicare." : null,
     paid ? `Received ${usdWhole(paid.total_usd)} from ${paid.companies} drug and device ${paid.companies === 1 ? "company" : "companies"} in ${paid.program_year} (Open Payments).` : null,
   ].filter(Boolean).join(" ");
   return {
@@ -82,10 +84,70 @@ function JsonLd({ p }: { p: ProviderRow }) {
   return <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data) }} />;
 }
 
+// Enrollment, order/referral eligibility and opt-out, each with its own "as of". Absence is stated
+// only once a file is loaded; ordering and opt-out apply to individual clinicians only.
+function MedicareSection({ m, individual }: { m: Medicare; individual: boolean }) {
+  if (!m.loaded) return null;
+  const current = m.optOuts.filter((o) => o.current);
+  const past = m.optOuts.filter((o) => !o.current);
+  const can = m.orderRefer ? ORDER_REFER_PROGRAMS.filter(([k]) => m.orderRefer![k]).map(([, l]) => l) : [];
+  const cannot = m.orderRefer ? ORDER_REFER_PROGRAMS.filter(([k]) => !m.orderRefer![k]).map(([, l]) => l) : [];
+  const types = [...new Set(m.enrollments.map((e) => titleCase(e.provider_type)).filter(Boolean))];
+  const states = [...new Set(m.enrollments.map((e) => e.state).filter(Boolean))];
+  return (
+    <section>
+      <h2>Medicare</h2>
+      {current.length > 0 && (
+        <p className="banner">
+          <strong>Opted out of Medicare</strong>{" "}
+          {current.map((o, i) => (
+            <span key={i}>{i > 0 ? "; " : ""}from {o.effective_date ?? "?"} to {o.end_date ?? "?"}{o.state ? ` (${o.state})` : ""}</span>
+          ))}
+          . Medicare doesn&apos;t pay for this clinician&apos;s services during an opt-out; patients pay under a private contract.
+        </p>
+      )}
+      <dl className="facts">
+        <dt>Enrollment</dt>
+        <dd>
+          {m.enrollments.length > 0
+            ? <>Enrolled{types.length ? `: ${types.join("; ")}` : ""}{states.length ? ` (${states.join(", ")})` : ""}</>
+            : "Not in CMS's public Medicare enrollment file"}
+          {m.asOf.enrollment && <span className="sub"> · as of {m.asOf.enrollment}</span>}
+        </dd>
+        {individual && (
+          <>
+            <dt>Order &amp; refer</dt>
+            <dd>
+              {!m.orderRefer
+                ? "Not on CMS's Order and Referring list. Medicare may deny claims that name this NPI as the ordering or referring provider."
+                : <>Eligible for {can.join(", ")}{cannot.length ? <span className="sub"> · not for {cannot.join(", ")}</span> : null}</>}
+              {m.asOf.orderReferring && <span className="sub"> · as of {m.asOf.orderReferring}</span>}
+            </dd>
+          </>
+        )}
+        {individual && past.length > 0 && (
+          <>
+            <dt>Past opt-outs</dt>
+            <dd>
+              {past.map((o, i) => (
+                <span key={i}>{i > 0 ? "; " : ""}{o.effective_date ?? "?"} to {o.end_date ?? "?"}{o.state ? ` (${o.state})` : ""}</span>
+              ))}
+            </dd>
+          </>
+        )}
+      </dl>
+      <p className="sub">
+        From CMS&apos;s public Medicare files on data.cms.gov, matched by NPI. Confirm in{" "}
+        <a href="https://pecos.cms.hhs.gov/" rel="nofollow noopener">PECOS</a> before relying on it.
+      </p>
+    </section>
+  );
+}
+
 export default async function ProviderPage({ params }: { params: Promise<{ npi: string }> }) {
   const { npi } = await params;
-  const [p, x, changes, oig, op] = await Promise.all([
-    getProvider(npi), getProviderExtras(npi), getProviderChanges(npi), getOigExclusions(npi), getOpenPayments(npi),
+  const [p, x, changes, oig, op, mc] = await Promise.all([
+    getProvider(npi), getProviderExtras(npi), getProviderChanges(npi), getOigExclusions(npi), getOpenPayments(npi), getMedicare(npi),
   ]);
   if (!p) notFound();
 
@@ -154,7 +216,7 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
         <dt>Type</dt><dd>{p.entity_type === "org" ? "Organization (Type 2)" : "Individual (Type 1)"}</dd>
         {p.specialty && (<><dt>Primary specialty</dt><dd>{p.specialty}{p.classification && p.classification !== p.specialty ? ` (${p.classification})` : ""}</dd></>)}
         {p.grouping && (<><dt>Specialty group</dt><dd>{p.grouping}</dd></>)}
-        {p.primary_taxonomy_code && (<><dt>Taxonomy code</dt><dd>{p.primary_taxonomy_code}</dd></>)}
+        {p.primary_taxonomy_code && (<><dt>Taxonomy code</dt><dd>{p.specialty_slug ? <Link href={`/specialty/${p.specialty_slug}`}>{p.primary_taxonomy_code}</Link> : p.primary_taxonomy_code}</dd></>)}
         {p.license_number && (<><dt>License number</dt><dd>{p.license_number}{p.license_state ? ` (${p.license_state})` : ""}</dd></>)}
         {p.sex && p.entity_type !== "org" && (<><dt>Sex</dt><dd>{p.sex === "F" ? "Female" : p.sex === "M" ? "Male" : p.sex}</dd></>)}
         {p.is_sole_proprietor != null && p.entity_type !== "org" && (<><dt>Sole proprietor</dt><dd>{p.is_sole_proprietor ? "Yes" : "No"}</dd></>)}
@@ -170,6 +232,8 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
           {p.practice_phone && <div>{formatPhone(p.practice_phone)}</div>}
         </div>
       )}
+
+      <MedicareSection m={mc} individual={p.entity_type !== "org"} />
 
       {op.latestYear !== null && (
         <section>

@@ -5,6 +5,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Medicare enrollment, order & referral eligibility, opt-out (2026-10-07)
+
+**Why:** "can this NPI bill or order for Medicare?" is a check billing teams run on every claim, and CMS
+spreads the answer over three files that its NPI registry doesn't show. `pecos lookup` is 4,400/mo (US).
+Together with the OIG flag, a provider page now answers it.
+
+**What changed:**
+- `pipeline/medicare.ts` loads three data.cms.gov files, each the newest CSV in the catalog
+  (`data.json`; versions are separate entries titled "<title> : YYYY-MM-DD"):
+  `public.medicare_enrollment` (Public Provider Enrollment, quarterly, one row per enrollment),
+  `public.medicare_order_referring` (Order and Referring, ~twice weekly, one row per NPI) and
+  `public.medicare_opt_out` (Opt Out Affidavits, monthly, one row per affidavit). Each streams into a stage
+  table, is built as `<table>_next`, and swapped in one transaction. A dataset whose URL is already loaded
+  is skipped (`dataset_loads.source`); one failing doesn't block the others; a file under its row floor is
+  refused. The tables are LOGGED on purpose: an UNLOGGED table comes back empty after a crash, and every
+  page would then say "not enrolled".
+- History: `medicare_enrolled` / `medicare_unenrolled`, `medicare_opted_out` / `medicare_opt_out_ended`,
+  and `medicare_ordering` (old → new program list). Not recorded on a dataset's first load.
+- The opt-out file keeps affidavits whose end date has passed (3,164 of 57,780 in Aug 2026), so "opted
+  out" means an affidavit with `end_date >= today`; ended ones show as past opt-outs. The enrollment file
+  isn't UTF-8, so it's read as Latin-1.
+- `refresh-server.ts` runs it on the 6-hourly check, after LEIE, skipping while an NPPES refresh runs.
+- `/npi/[npi]`: a "Medicare" section (enrollment, order & refer, opt-out, each "as of" its load date,
+  with a pointer to PECOS). An absent record is stated only once the files are loaded; order & refer
+  and opt-out are shown for individuals only. A current opt-out also leads the meta description.
+- `GET /api/npi/{npi}`: `medicare` (enrollments, `orderReferring` per program or null, opt-out
+  affidavits, `asOf`). Bulk `POST /api/npi` and `/tools/bulk-lookup` (table + CSV) carry
+  `medicareEnrolled`, `medicareOptedOut`, `medicareOrderRefer`.
+- First load: 2,978,925 enrollments / 2,541,258 NPIs; 2,056,486 order & referring NPIs; 57,624 opt-out
+  affidavits / 57,015 NPIs.
+
+### Added — Taxonomy codes on specialty pages (2026-10-07)
+
+**Why:** `taxonomy code lookup` is 1,900/mo (US). Every code already had a specialty page, but the code
+itself was absent from its title, heading and description, so the page couldn't rank for it, and a
+typed code didn't resolve.
+
+**What changed:**
+- `taxonomy.definition`: NUCC's definition, which the loader used to drop. NUCC's placeholder "Definition
+  to come..." (216 codes) is stored as null. The live schema was backfilled by hand from
+  `nucc_taxonomy_251.csv` (657 of 883 codes have one); `load.ts` writes it from the next load on.
+- `/specialty/[slug]`: code in the title and description, a "Taxonomy code" row, and the NUCC
+  definition on page 1. `/specialty/207Q00000X` (any case) 308s to the specialty page; `/search?q=<code>`
+  redirects there too.
+- `/specialty` lists each specialty's code; the provider page's taxonomy code links to its specialty.
+
 ### Added — CMS Open Payments: industry payments per clinician (2026-10-07)
 
 **Why:** what drug and device makers paid a clinician is public, searched for, and hard to read on

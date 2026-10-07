@@ -33,7 +33,20 @@ export interface ProviderRow {
   classification: string | null;
   grouping: string | null;
   oig_excluded: boolean; // on the HHS OIG exclusion list (pipeline/leie.ts), matched by NPI
+  // CMS Medicare files (pipeline/medicare.ts), matched by NPI
+  medicare_enrolled: boolean; // in the public provider enrollment file
+  medicare_opted_out: boolean; // an opt-out affidavit that hasn't ended
+  medicare_order_refer: string[] | null; // programs it may order/refer for; null = not on the list
 }
+
+// Medicare status columns, shared by getProvider and getProviders so a bulk row matches a single lookup.
+const MEDICARE_COLS = `
+            EXISTS (SELECT 1 FROM public.medicare_enrollment m WHERE m.npi = p.npi) AS medicare_enrolled,
+            EXISTS (SELECT 1 FROM public.medicare_opt_out o WHERE o.npi = p.npi AND o.end_date >= current_date) AS medicare_opted_out,
+            (SELECT array_remove(ARRAY[CASE WHEN r.part_b THEN 'Part B' END, CASE WHEN r.dme THEN 'DME' END,
+                    CASE WHEN r.hha THEN 'Home health' END, CASE WHEN r.pmd THEN 'Power mobility' END,
+                    CASE WHEN r.hospice THEN 'Hospice' END], NULL)
+               FROM public.medicare_order_referring r WHERE r.npi = p.npi) AS medicare_order_refer`;
 
 export async function getProvider(npi: string): Promise<ProviderRow | null> {
   if (!/^\d{10}$/.test(npi)) return null; // cheap reject before hitting the DB
@@ -46,7 +59,8 @@ export async function getProvider(npi: string): Promise<ProviderRow | null> {
             to_char(p.deactivation_date, 'YYYY-MM-DD') AS deactivation_date,
             p.is_sole_proprietor, p.license_number, p.license_state,
             t.display_name AS specialty, t.slug AS specialty_slug, t.classification, t.grouping,
-            EXISTS (SELECT 1 FROM public.oig_exclusions e WHERE e.npi = p.npi) AS oig_excluded
+            EXISTS (SELECT 1 FROM public.oig_exclusions e WHERE e.npi = p.npi) AS oig_excluded,
+            ${MEDICARE_COLS}
        FROM providers p
        LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
       WHERE p.npi = $1`,
@@ -68,7 +82,8 @@ export async function getProviders(npis: string[]): Promise<ProviderRow[]> {
             to_char(p.deactivation_date, 'YYYY-MM-DD') AS deactivation_date,
             p.is_sole_proprietor, p.license_number, p.license_state,
             t.display_name AS specialty, t.slug AS specialty_slug, t.classification, t.grouping,
-            EXISTS (SELECT 1 FROM public.oig_exclusions e WHERE e.npi = p.npi) AS oig_excluded
+            EXISTS (SELECT 1 FROM public.oig_exclusions e WHERE e.npi = p.npi) AS oig_excluded,
+            ${MEDICARE_COLS}
        FROM providers p
        LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
       WHERE p.npi = ANY($1::text[])`,
@@ -110,6 +125,9 @@ export function toPublicJson(p: ProviderRow) {
     deactivationDate: p.deactivation_date,
     deactivated: p.deactivation_date != null,
     oigExcluded: p.oig_excluded,
+    medicareEnrolled: p.medicare_enrolled,
+    medicareOptedOut: p.medicare_opted_out,
+    medicareOrderRefer: p.medicare_order_refer ?? [],
     source: "NPPES",
     url: `https://npiradar.com/npi/${p.npi}`,
   };
@@ -222,7 +240,10 @@ function formatStoredAddress(a: string | null): string | null {
   return [...parts.map((p) => titleCase(p)), [state, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
 }
 
-const STATUS_CHANGES = new Set(["added", "deactivated", "reactivated", "oig_excluded", "oig_reinstated"]);
+const STATUS_CHANGES = new Set([
+  "added", "deactivated", "reactivated", "oig_excluded", "oig_reinstated",
+  "medicare_enrolled", "medicare_unenrolled", "medicare_opted_out", "medicare_opt_out_ended",
+]);
 
 const CHANGE_LABELS: Record<string, string> = {
   added: "Added to the registry",
@@ -235,6 +256,9 @@ const CHANGE_LABELS: Record<string, string> = {
   credential: "Credential changed",
   license: "License changed",
   oig_reinstated: "Removed from the HHS OIG exclusion list",
+  medicare_unenrolled: "Left Medicare's public enrollment file",
+  medicare_opt_out_ended: "Medicare opt-out affidavit removed",
+  medicare_ordering: "Medicare order and referral eligibility changed",
 };
 
 /** Display-ready change, shared by the page and the API so they can't drift. */
@@ -250,6 +274,8 @@ export function describeChange(c: ProviderChange) {
     change: c.change,
     label:
       c.change === "deactivated" && c.new_value ? `Deactivated, effective ${c.new_value}`
+      : c.change === "medicare_enrolled" ? `Enrolled in Medicare${c.new_value ? ` (${titleCase(c.new_value)})` : ""}`
+      : c.change === "medicare_opted_out" ? `Opted out of Medicare${c.new_value ? `, effective ${c.new_value}` : ""}`
       : c.change === "oig_excluded" ? `Added to the HHS OIG exclusion list${c.new_value ? ` (${oigSection(c.new_value)}${oigTypeLabel(c.new_value) ? `: ${oigTypeLabel(c.new_value)}` : ""})` : ""}`
       : CHANGE_LABELS[c.change] ?? c.change,
     // Status changes are their own statement; only field changes carry a from → to.
@@ -341,6 +367,72 @@ export function openPaymentsToPublicJson(op: OpenPayments) {
       latestYear: op.latestYear,
       topCompanies: op.companies.map((c) => ({ company: c.company, totalUsd: usd(c.total_usd), payments: c.payments })),
       byNature: op.natures.map((n) => ({ nature: n.nature, totalUsd: usd(n.total_usd), payments: n.payments })),
+    },
+  };
+}
+
+// ── CMS Medicare: enrollment, order & referral eligibility, opt-out (pipeline/medicare.ts) ──────────
+// Matched by NPI. Each file has its own cadence, so each carries its own "as of" (our load date).
+
+export interface Medicare {
+  loaded: boolean; // false until the first load: show nothing rather than "not enrolled" for everyone
+  enrollments: { provider_type: string | null; state: string | null }[];
+  orderRefer: { part_b: boolean; dme: boolean; hha: boolean; pmd: boolean; hospice: boolean } | null;
+  optOuts: { specialty: string | null; effective_date: string | null; end_date: string | null; state: string | null; current: boolean }[];
+  asOf: { enrollment: string | null; orderReferring: string | null; optOut: string | null };
+}
+
+const EMPTY_MEDICARE: Medicare = { loaded: false, enrollments: [], orderRefer: null, optOuts: [], asOf: { enrollment: null, orderReferring: null, optOut: null } };
+
+// [column, label, API key]
+export const ORDER_REFER_PROGRAMS = [
+  ["part_b", "Part B", "partB"], ["dme", "DME", "dme"], ["hha", "Home health", "homeHealth"],
+  ["pmd", "Power mobility", "powerMobility"], ["hospice", "Hospice", "hospice"],
+] as const;
+
+export async function getMedicare(npi: string): Promise<Medicare> {
+  if (!/^\d{10}$/.test(npi)) return EMPTY_MEDICARE;
+  try {
+    const [enr, ord, opt, asOf] = await Promise.all([
+      query<Medicare["enrollments"][number]>(
+        `SELECT DISTINCT provider_type, state FROM public.medicare_enrollment WHERE npi = $1 ORDER BY state, provider_type`, [npi]),
+      query<NonNullable<Medicare["orderRefer"]>>(
+        `SELECT part_b, dme, hha, pmd, hospice FROM public.medicare_order_referring WHERE npi = $1`, [npi]),
+      query<Medicare["optOuts"][number]>(
+        `SELECT specialty, to_char(effective_date, 'YYYY-MM-DD') AS effective_date, to_char(end_date, 'YYYY-MM-DD') AS end_date,
+                state, end_date >= current_date AS current
+           FROM public.medicare_opt_out WHERE npi = $1 ORDER BY end_date DESC NULLS LAST`, [npi]),
+      query<{ dataset: string; at: string }>(
+        `SELECT dataset, to_char(max(loaded_at), 'YYYY-MM-DD') AS at FROM public.dataset_loads
+          WHERE dataset IN ('medicare_enrollment', 'medicare_order_referring', 'medicare_opt_out') GROUP BY dataset`),
+    ]);
+    const at = (k: string) => asOf.find((a) => a.dataset === k)?.at ?? null;
+    return {
+      loaded: asOf.length > 0,
+      enrollments: enr, orderRefer: ord[0] ?? null, optOuts: opt,
+      asOf: { enrollment: at("medicare_enrollment"), orderReferring: at("medicare_order_referring"), optOut: at("medicare_opt_out") },
+    };
+  } catch (e) {
+    if ((e as { code?: string }).code === "42P01") return EMPTY_MEDICARE; // not loaded yet
+    throw e;
+  }
+}
+
+export function medicareToPublicJson(m: Medicare) {
+  if (!m.loaded) return { medicare: null };
+  return {
+    medicare: {
+      enrolled: m.enrollments.length > 0,
+      enrollments: m.enrollments.map((e) => ({ providerType: titleCase(e.provider_type), state: e.state })),
+      orderReferring: m.orderRefer
+        ? Object.fromEntries(ORDER_REFER_PROGRAMS.map(([k, , key]) => [key, m.orderRefer![k]]))
+        : null, // null = not on CMS's Order and Referring list
+      optedOut: m.optOuts.some((o) => o.current),
+      optOutAffidavits: m.optOuts.map((o) => ({
+        specialty: o.specialty, state: o.state, effective: o.effective_date, end: o.end_date, current: o.current,
+      })),
+      asOf: m.asOf,
+      source: "CMS: Medicare Fee-For-Service Public Provider Enrollment, Order and Referring, Opt Out Affidavits (data.cms.gov)",
     },
   };
 }

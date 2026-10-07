@@ -53,6 +53,12 @@ export default async function BulkLookupPage() {
           <li><code>name</code> and <code>entityType</code>: the provider or organization, individual or organization</li>
           <li><code>specialty</code>: the primary taxonomy, e.g. &ldquo;Physical Therapy Clinic/Center&rdquo;</li>
           <li><code>city</code> and <code>state</code>: the practice location</li>
+          <li><code>deactivated</code> and <code>oigExcluded</code>: deactivated in NPPES; on the HHS OIG exclusion list</li>
+          <li>
+            <code>medicareEnrolled</code>, <code>medicareOptedOut</code> and <code>medicareOrderRefer</code>: in CMS&apos;s
+            public Medicare enrollment file; opted out of Medicare now; and the programs it may order or refer for
+            (Part B, DME, home health, power mobility, hospice), empty if it isn&apos;t on CMS&apos;s Order and Referring list
+          </li>
         </ul>
         <p>
           A <code>not_found</code> row usually means a typo. Check it with the{" "}

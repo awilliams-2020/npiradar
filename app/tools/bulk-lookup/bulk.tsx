@@ -16,6 +16,16 @@ interface Row {
   state?: string | null;
   deactivated?: boolean;
   oigExcluded?: boolean;
+  medicareEnrolled?: boolean;
+  medicareOptedOut?: boolean;
+  medicareOrderRefer?: string[];
+}
+
+/** "Opted out" / "Enrolled · orders Part B, DME" / "Not enrolled" — the Medicare cell of a row. */
+function medicareLabel(r: Row): string {
+  if (r.medicareOptedOut) return "Opted out";
+  const orders = r.medicareOrderRefer?.length ? `orders ${r.medicareOrderRefer.join(", ")}` : null;
+  return [r.medicareEnrolled ? "Enrolled" : "Not enrolled", orders].filter(Boolean).join(" · ");
 }
 
 function parseNpis(text: string): string[] {
@@ -24,10 +34,11 @@ function parseNpis(text: string): string[] {
 }
 
 function toCsv(rows: Row[]): string {
-  const head = ["npi", "status", "valid", "name", "entityType", "specialty", "city", "state", "deactivated", "oigExcluded"];
+  const head = ["npi", "status", "valid", "name", "entityType", "specialty", "city", "state", "deactivated", "oigExcluded", "medicareEnrolled", "medicareOptedOut", "medicareOrderRefer"];
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((r) =>
-    [r.npi, r.status, r.valid ?? "", r.name ?? "", r.entityType ?? "", r.specialty ?? "", r.city ?? "", r.state ?? "", r.deactivated ?? "", r.oigExcluded ?? ""]
+    [r.npi, r.status, r.valid ?? "", r.name ?? "", r.entityType ?? "", r.specialty ?? "", r.city ?? "", r.state ?? "", r.deactivated ?? "", r.oigExcluded ?? "",
+      r.medicareEnrolled ?? "", r.medicareOptedOut ?? "", r.medicareOrderRefer?.join("; ") ?? ""]
       .map(esc)
       .join(","),
   );
@@ -67,12 +78,14 @@ export function BulkLookup() {
           npi: string; valid?: boolean; name?: string; entityType?: string | null;
           specialty?: string | null; practiceLocation?: { city?: string; state?: string };
           deactivated?: boolean; oigExcluded?: boolean;
+          medicareEnrolled?: boolean; medicareOptedOut?: boolean; medicareOrderRefer?: string[];
         }) => [
           p.npi,
           {
             npi: p.npi, status: "ok", valid: p.valid, name: p.name, entityType: p.entityType,
             specialty: p.specialty, city: p.practiceLocation?.city, state: p.practiceLocation?.state,
             deactivated: p.deactivated, oigExcluded: p.oigExcluded,
+            medicareEnrolled: p.medicareEnrolled, medicareOptedOut: p.medicareOptedOut, medicareOrderRefer: p.medicareOrderRefer,
           } as Row,
         ]),
       );
@@ -125,7 +138,7 @@ export function BulkLookup() {
       {rows.length > 0 && (
         <table className="bulk">
           <thead>
-            <tr><th>NPI</th><th>Name</th><th>Specialty</th><th>Location</th><th>Status</th></tr>
+            <tr><th>NPI</th><th>Name</th><th>Specialty</th><th>Location</th><th>Medicare</th><th>Status</th></tr>
           </thead>
           <tbody>
             {rows.map((r) => (
@@ -134,6 +147,7 @@ export function BulkLookup() {
                 <td>{r.name ?? "—"}</td>
                 <td>{r.specialty ?? "—"}</td>
                 <td>{[r.city, r.state].filter(Boolean).join(", ") || "—"}</td>
+                <td>{r.status !== "ok" ? "—" : medicareLabel(r)}</td>
                 <td>
                   {r.status === "ok" && r.oigExcluded ? <span className="badge bad">OIG excluded</span>
                     : r.status === "ok" && r.deactivated ? <span className="badge bad">Deactivated</span>

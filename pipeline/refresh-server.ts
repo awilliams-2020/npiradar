@@ -157,7 +157,31 @@ async function scheduledCheck() {
     console.error("scheduled check failed:", e);
   }
   await refreshLeie();
+  await refreshMedicare();
   await refreshOpenPayments();
+}
+
+// CMS Medicare files (pipeline/medicare.ts): enrollment (quarterly), order & referring (~twice weekly),
+// opt-out (monthly). One catalog fetch when nothing changed; a full reload is ~2-3 min, so like Open
+// Payments it waits out an NPPES run rather than competing with it for Postgres.
+let medicareRunning = false;
+async function refreshMedicare(): Promise<void> {
+  if (medicareRunning) return;
+  const busy = await pool
+    .query(`SELECT 1 FROM public.refresh_runs WHERE state='running' AND started_at > now() - interval '3 hours'`)
+    .then((r) => (r.rowCount ?? 0) > 0)
+    .catch(() => true);
+  if (busy) { console.log("medicare: skipped, NPPES refresh running"); return; }
+  medicareRunning = true;
+  await new Promise<void>((resolve) => {
+    execFile(path.join(SRC, "node_modules/.bin/tsx"), [path.join(SRC, "pipeline/medicare.ts")], { timeout: 3_600_000, maxBuffer: 16 << 20 }, (err, stdout, stderr) => {
+      const out = `${stdout}${stderr}`.trim();
+      if (err) console.error(`medicare check failed: ${out.split("\n").slice(-5).join("\n") || err.message}`);
+      else console.log(out); // one line per dataset per check, so a stalled scheduler is visible
+      resolve();
+    });
+  });
+  medicareRunning = false;
 }
 
 // Open Payments (pipeline/openpayments.ts): a no-op catalog fetch unless CMS published or corrected a
