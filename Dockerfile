@@ -10,7 +10,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 # Copy only what the Next build needs — the pipeline/ and data/ dirs are excluded via .dockerignore.
-COPY package.json next.config.mjs tsconfig.json next-env.d.ts ./
+COPY package.json next.config.mjs tsconfig.json next-env.d.ts instrumentation.ts ./
 COPY app ./app
 COPY lib ./lib
 COPY public ./public

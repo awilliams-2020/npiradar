@@ -15,15 +15,32 @@ async function orNull<T>(fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
-// National stats scan ~1M rows; they only change when a dataset loads, so cache per instance for a day.
+// National stats scan ~1M rows (opNational ~7 s, oigNational ~0.3 s) and change only when a dataset loads,
+// so they're cached per instance for a day, stale-while-revalidate: once a value exists no request waits
+// on the scan again; an expired one is served while one background recompute replaces it. Concurrent
+// first requests share one computation. instrumentation.ts warms both at startup (warmInsights), so the
+// first visitor after a deploy or restart doesn't pay the 7 s either.
 const DAY = 86_400_000;
-const memo = new Map<string, { at: number; v: unknown }>();
+// On globalThis, not module scope: Next bundles instrumentation.ts separately from the pages, so each gets
+// its own copy of this module, and a module-level Map warmed at startup would never be seen by a page.
+const g = globalThis as unknown as { _npiInsights?: { memo: Map<string, { at: number; v: unknown }>; inflight: Map<string, Promise<unknown>> } };
+const { memo, inflight } = (g._npiInsights ??= { memo: new Map(), inflight: new Map() });
+function compute<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const running = inflight.get(key);
+  if (running) return running as Promise<T>;
+  const p = fn()
+    .then((v) => { if (v !== null) memo.set(key, { at: Date.now(), v }); return v; })
+    .finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
 async function daily<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const hit = memo.get(key);
-  if (hit && Date.now() - hit.at < DAY) return hit.v as T;
-  const v = await fn();
-  if (v !== null) memo.set(key, { at: Date.now(), v });
-  return v;
+  if (!hit) return compute(key, fn);
+  if (Date.now() - hit.at >= DAY) {
+    compute(key, fn).catch((e) => console.error(`insights: refresh of ${key} failed:`, e)); // keep serving the old value
+  }
+  return hit.v as T;
 }
 
 export interface RankedProvider { npi: string; name: string; specialty: string | null; city: string | null; state: string | null; total_usd: string }
@@ -135,3 +152,10 @@ export function facetInsights(state: string, citySlug: string, specialtySlug = "
 
 export const usd = (s: string | number) =>
   Number(s).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+/** Fills the national caches. Called once at server start by instrumentation.ts. */
+export async function warmInsights(): Promise<void> {
+  const t = Date.now();
+  await Promise.all([opNational(), oigNational()]);
+  console.log(`insights: warmed national stats in ${Date.now() - t} ms`);
+}

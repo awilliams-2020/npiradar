@@ -5,6 +5,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — /open-payments took ~7 s on the first request after every restart (2026-10-07)
+
+`lib/insights.ts` cached the national Open Payments / OIG stats for a day per process, so the first
+visitor after a deploy, restart or daily expiry waited for the ~1M-row scan (7.0 s; OIG page 0.33 s).
+- Stale-while-revalidate: once cached, an expired value is served while one background recompute
+  replaces it; concurrent first requests share one computation.
+- `instrumentation.ts` warms both at server start (~7 s in the background; "insights: warmed" in the log).
+  The cache lives on `globalThis` because Next bundles instrumentation separately from the pages, so a
+  module-level Map warmed at startup was invisible to them (first try: still 6 s).
+- The Dockerfile copies named files only, so `instrumentation.ts` had to be added there (and to
+  `tsconfig.json`'s include, or `tsc` never checks it).
+- First request after a deploy: `/open-payments` 7.0 s → 0.15 s, `/oig-exclusion-check` 0.33 → 0.03 s.
+
+### Added — Care Compare background, groups and affiliations; Medicare revalidation; license verify links (2026-10-07)
+
+**Why:** the last three items of the data fold-in plan. Care Compare is CMS's richest public file per
+clinician and none of it is on the NPI registry; `medicare provider lookup` is 3,600/mo, `pecos lookup`
+4,400/mo, `medicare revalidation lookup` 880/mo, license lookups 2,400-49,500/mo (US).
+
+**What changed:**
+- `pipeline/lib/cms-csv.ts`: the stream → stage → `<table>_next` → swap → `dataset_loads` loader, moved out
+  of `medicare.ts` so `carecompare.ts` shares it. A dataset may now build several tables from one file.
+  Output indexes are named `<table>_key`.
+- `medicare.ts` + **Revalidation Due Date List** → `public.medicare_revalidation` (2,961,404 enrollments,
+  2.46M NPIs). Only ~10% carry a date; the page says "No due date set by CMS yet" for the rest, and marks
+  a date that has passed. API `medicare.revalidation`; bulk `medicareRevalidationDue` (earliest date set).
+- `pipeline/carecompare.ts` (provider-data catalog): `cc_clinicians` (1,627,468 NPIs: medical school,
+  graduation year, secondary specialties, telehealth, Medicare assignment), `cc_groups` (1,767,885
+  clinician × group rows), `cc_affiliations` (2,253,990) and `cc_hospitals` (5,419, to name the 85% of
+  affiliations that are hospitals; 99% match by CCN). 649 MB, ~3 min. CMS writes "OTHER" for ~60% of
+  medical schools; stored as null. `/npi/[npi]` "Medicare Care Compare" section; API `careCompare`.
+- `refresh-server.ts`: `runCmsLoader` runs `medicare.ts` and `carecompare.ts` on the 6-hourly check.
+- License: `lib/license.ts` links physicians to DocInfo (FSMB) and nurses (RN, LPN/LVN, NP, CNS, CRNA,
+  midwife) to Nursys; everyone else is told to verify with their state's board (no single source exists).
+  Shown next to the license number; API `licenseVerification`. Nursys 403s server requests, so the link
+  goes to its home page rather than a QuickConfirm deep link that couldn't be checked.
+
 ### Fixed — Slow city, specialty and home pages (2026-10-07)
 
 **Why:** these pages render per request, and three queries scaled with the size of the facet. Houston's
