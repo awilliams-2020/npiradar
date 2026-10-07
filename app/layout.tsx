@@ -40,7 +40,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <div className="container">
             <p>
               Data: {await dataVintage()}, a public-domain dataset from CMS. NPIRadar is not affiliated with
-              or endorsed by CMS.
+              or endorsed by CMS. <Link href="/about">About &amp; contact</Link>
             </p>
           </div>
         </footer>

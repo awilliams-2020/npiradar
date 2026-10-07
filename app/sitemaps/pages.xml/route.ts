@@ -11,6 +11,7 @@ export function GET() {
     { loc: "/tools/bulk-lookup" },
     { loc: "/nppes" },
     { loc: "/npi-api" },
+    { loc: "/about" },
   ];
   return xmlResponse(urlsetXml(urls));
 }
