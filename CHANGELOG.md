@@ -5,6 +5,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — CMS Open Payments: industry payments per clinician (2026-10-07)
+
+**Why:** what drug and device makers paid a clinician is public, searched for, and hard to read on
+CMS's own site. It is the largest block of per-NPI content the NPI registry doesn't have.
+
+**What changed:**
+- `pipeline/openpayments.ts` finds each program year's general-payments CSV (~9 GB, ~15M rows) through
+  CMS's DKAN catalog, streams 6 columns into an UNLOGGED `public.op_stage`, aggregates per NPI into
+  `op_npi_year` (total, payments, companies), `op_npi_company` (top 10) and `op_npi_nature` (by payment
+  type), swaps that year's rows in one transaction, then drops the stage and deletes the download.
+  Keeps the latest 3 program years. A year whose catalog URL is already loaded is skipped
+  (`dataset_loads.source`), so a check is one catalog fetch. CMS republishes years with corrections;
+  a new URL reloads that year.
+- Aggregation is serial at `work_mem=64MB`, for the same /dev/shm reason as the NPPES diff.
+- `refresh-server.ts` runs it on the 6-hourly check, but never while an NPPES refresh is running.
+- `/npi/[npi]`: "Payments from drug and device companies" (by year, top companies and payment types for
+  the latest year, with "reporting a payment does not imply wrongdoing"). `GET /api/npi/{npi}`:
+  `openPayments`.
+- If a load fails, the download and `op_stage` stay for the retry; the next run drops the stage first
+  and resumes the download.
+- First load, program year 2025: 16,089,033 rows with an NPI → 1,020,608 NPIs, $2.89B. 2024 and 2023 were
+  loaded by the scheduler right after.
+
 ### Added — HHS OIG exclusion flags (LEIE) (2026-10-07)
 
 **Why:** OIG's exclusion list bars people and entities from federal health programs, but CMS's NPI

@@ -297,3 +297,50 @@ export function oigToPublicJson(x: OigExclusion[]) {
     oigSource: "HHS OIG List of Excluded Individuals/Entities (LEIE). Verify at " + OIG_VERIFY_URL,
   };
 }
+
+// ── CMS Open Payments: industry payments to the clinician (pipeline/openpayments.ts) ────────────────
+
+export interface OpenPayments {
+  years: { program_year: number; total_usd: string; payments: number; companies: number }[];
+  latestYear: number | null;
+  companies: { company: string | null; total_usd: string; payments: number }[]; // latest year, top 10
+  natures: { nature: string | null; total_usd: string; payments: number }[]; // latest year
+}
+
+const EMPTY_OP: OpenPayments = { years: [], latestYear: null, companies: [], natures: [] };
+
+export async function getOpenPayments(npi: string): Promise<OpenPayments> {
+  if (!/^\d{10}$/.test(npi)) return EMPTY_OP;
+  try {
+    const years = await query<OpenPayments["years"][number]>(
+      `SELECT program_year, total_usd::text, payments, companies FROM public.op_npi_year
+        WHERE npi = $1 ORDER BY program_year DESC`, [npi]);
+    if (years.length === 0) return EMPTY_OP;
+    const y = years[0].program_year;
+    const [companies, natures] = await Promise.all([
+      query<OpenPayments["companies"][number]>(
+        `SELECT c.company, c.total_usd::text AS total_usd, c.payments FROM public.op_npi_company c
+          WHERE c.npi = $1 AND c.program_year = $2 ORDER BY c.total_usd DESC`, [npi, y]), // c.: sort the numeric, not the ::text alias
+      query<OpenPayments["natures"][number]>(
+        `SELECT n.nature, n.total_usd::text AS total_usd, n.payments FROM public.op_npi_nature n
+          WHERE n.npi = $1 AND n.program_year = $2 ORDER BY n.total_usd DESC`, [npi, y]),
+    ]);
+    return { years, latestYear: y, companies, natures };
+  } catch (e) {
+    if ((e as { code?: string }).code === "42P01") return EMPTY_OP; // not loaded yet
+    throw e;
+  }
+}
+
+export function openPaymentsToPublicJson(op: OpenPayments) {
+  const usd = (s: string) => Number(s);
+  return {
+    openPayments: op.years.length === 0 ? null : {
+      source: "CMS Open Payments, general payments (as published, disputed payments included)",
+      byYear: op.years.map((y) => ({ year: y.program_year, totalUsd: usd(y.total_usd), payments: y.payments, companies: y.companies })),
+      latestYear: op.latestYear,
+      topCompanies: op.companies.map((c) => ({ company: c.company, totalUsd: usd(c.total_usd), payments: c.payments })),
+      byNature: op.natures.map((n) => ({ nature: n.nature, totalUsd: usd(n.total_usd), payments: n.payments })),
+    },
+  };
+}

@@ -157,6 +157,29 @@ async function scheduledCheck() {
     console.error("scheduled check failed:", e);
   }
   await refreshLeie();
+  await refreshOpenPayments();
+}
+
+// Open Payments (pipeline/openpayments.ts): a no-op catalog fetch unless CMS published or corrected a
+// program year; a real load is ~9 GB per year, so never alongside an NPPES run (same disk + Postgres).
+let opRunning = false;
+async function refreshOpenPayments(): Promise<void> {
+  if (opRunning) return;
+  const busy = await pool
+    .query(`SELECT 1 FROM public.refresh_runs WHERE state='running' AND started_at > now() - interval '3 hours'`)
+    .then((r) => (r.rowCount ?? 0) > 0)
+    .catch(() => true);
+  if (busy) { console.log("op: skipped, NPPES refresh running"); return; }
+  opRunning = true;
+  await new Promise<void>((resolve) => {
+    execFile(path.join(SRC, "node_modules/.bin/tsx"), [path.join(SRC, "pipeline/openpayments.ts")], { timeout: 4 * 3_600_000, maxBuffer: 16 << 20 }, (err, stdout, stderr) => {
+      const out = `${stdout}${stderr}`.trim();
+      if (err) console.error(`op check failed: ${out.split("\n").slice(-5).join("\n") || err.message}`);
+      else console.log(out.split("\n").filter((l) => l.startsWith("op ")).join("\n"));
+      resolve();
+    });
+  });
+  opRunning = false;
 }
 
 // OIG exclusion list (pipeline/leie.ts): a 15 MB file, loaded in seconds, so it runs inline here

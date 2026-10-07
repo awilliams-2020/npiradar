@@ -16,6 +16,10 @@ rebuilt, so it is the one table here that must be backed up. See CHANGELOG 2026-
 
 The same 6-hourly check also runs `pipeline/leie.ts` (HHS OIG exclusion list → `public.oig_exclusions`).
 It logs one `leie:` line per check. By hand: `docker exec npiradar-refresh npx tsx pipeline/leie.ts`.
+
+Then `pipeline/openpayments.ts` (CMS Open Payments, latest 3 program years → `public.op_npi_*`), skipped
+while an NPPES run is going. A no-op unless CMS published or corrected a year; a real load is ~9 GB per
+year and ~15 min. By hand: `docker exec npiradar-refresh npx tsx pipeline/openpayments.ts [--years 2025]`.
 Built 2026-05-24. See also `pipeline/README.md` (the manual pipeline) and `STATUS.md`.
 
 ## How it works

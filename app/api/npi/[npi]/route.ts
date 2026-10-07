@@ -1,4 +1,4 @@
-import { getProvider, getProviderExtras, getProviderChanges, getOigExclusions, describeChange, toPublicJson, extrasToPublicJson, oigToPublicJson } from "@/lib/provider";
+import { getProvider, getProviderExtras, getProviderChanges, getOigExclusions, getOpenPayments, describeChange, toPublicJson, extrasToPublicJson, oigToPublicJson, openPaymentsToPublicJson } from "@/lib/provider";
 import { guard, CORS } from "@/lib/api";
 
 // Public, CORS-open NPI lookup API. Free endpoint = backlink magnet + seed for a future freemium tier.
@@ -21,12 +21,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ npi: str
   const g = await guard(req, 1);
   if ("limited" in g) return g.limited;
 
-  let p, x, ch, oig;
+  let p, x, ch, oig, op;
   try {
-    [p, x, ch, oig] = await Promise.all([getProvider(npi), getProviderExtras(npi, { full: true }), getProviderChanges(npi), getOigExclusions(npi)]);
+    [p, x, ch, oig, op] = await Promise.all([
+      getProvider(npi), getProviderExtras(npi, { full: true }), getProviderChanges(npi), getOigExclusions(npi), getOpenPayments(npi),
+    ]);
   } catch {
     return Response.json({ error: "unavailable" }, { status: 503, headers: g.headers });
   }
   if (!p) return Response.json({ error: "not_found", npi }, { status: 404, headers: g.headers });
-  return Response.json({ ...toPublicJson(p), ...oigToPublicJson(oig), ...extrasToPublicJson(x), changes: ch.map(describeChange) }, { headers: { ...g.headers, ...CACHE } });
+  return Response.json({ ...toPublicJson(p), ...oigToPublicJson(oig), ...extrasToPublicJson(x), ...openPaymentsToPublicJson(op), changes: ch.map(describeChange) }, { headers: { ...g.headers, ...CACHE } });
 }

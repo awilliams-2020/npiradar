@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
-import { getProvider, getProviderExtras, getProviderChanges, getOigExclusions, describeChange, OTHER_NAME_TYPES, type ProviderRow } from "@/lib/provider";
+import { getProvider, getProviderExtras, getProviderChanges, getOigExclusions, getOpenPayments, describeChange, OTHER_NAME_TYPES, type ProviderRow } from "@/lib/provider";
 import { slugify, cityStateSlug } from "@/lib/slug";
 import { stateName, STATE_NAMES } from "@/lib/states";
 import { Breadcrumbs, LinkChips } from "@/app/_components/facet";
@@ -10,6 +10,8 @@ import { oigSection, oigTypeLabel, OIG_VERIFY_URL } from "@/lib/oig";
 
 export const revalidate = 2592000; // 30d — matches the monthly NPPES refresh cadence
 export const dynamicParams = true; // render any NPI on first request, then cache (ISR at 8M scale)
+
+const usd = (s: string) => Number(s).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
 const monthYear = (d: string) =>
   new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
@@ -63,7 +65,9 @@ function JsonLd({ p }: { p: ProviderRow }) {
 
 export default async function ProviderPage({ params }: { params: Promise<{ npi: string }> }) {
   const { npi } = await params;
-  const [p, x, changes, oig] = await Promise.all([getProvider(npi), getProviderExtras(npi), getProviderChanges(npi), getOigExclusions(npi)]);
+  const [p, x, changes, oig, op] = await Promise.all([
+    getProvider(npi), getProviderExtras(npi), getProviderChanges(npi), getOigExclusions(npi), getOpenPayments(npi),
+  ]);
   if (!p) notFound();
 
   const name = fullName(p);
@@ -145,6 +149,38 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
           <div>{[loc, formatZip(p.practice_zip)].filter(Boolean).join(" ")}</div>
           {p.practice_phone && <div>{formatPhone(p.practice_phone)}</div>}
         </div>
+      )}
+
+      {op.latestYear !== null && (
+        <section>
+          <h2>Payments from drug and device companies</h2>
+          <p className="sub">
+            General payments reported to CMS Open Payments, as published (disputed payments included).
+            Reporting a payment does not imply wrongdoing.
+          </p>
+          <table className="bulk">
+            <thead><tr><th>Year</th><th>Total</th><th>Payments</th><th>Companies</th></tr></thead>
+            <tbody>
+              {op.years.map((y) => (
+                <tr key={y.program_year}>
+                  <td>{y.program_year}</td><td>{usd(y.total_usd)}</td><td>{y.payments.toLocaleString()}</td><td>{y.companies}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {op.companies.length > 0 && (
+            <>
+              <h3>Top companies, {op.latestYear}</h3>
+              <ul>{op.companies.map((c, i) => <li key={i}>{c.company ?? "Unknown"} · {usd(c.total_usd)}</li>)}</ul>
+            </>
+          )}
+          {op.natures.length > 0 && (
+            <>
+              <h3>By type, {op.latestYear}</h3>
+              <ul>{op.natures.map((n, i) => <li key={i}>{n.nature ?? "Other"} · {usd(n.total_usd)} ({n.payments.toLocaleString()})</li>)}</ul>
+            </>
+          )}
+        </section>
       )}
 
       {x.otherNames.length > 0 && (
