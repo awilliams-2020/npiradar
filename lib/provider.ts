@@ -2,6 +2,7 @@ import { query } from "@/lib/db";
 import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
 import { oigSection, oigTypeLabel, OIG_VERIFY_URL } from "@/lib/oig";
+import { licenseVerification } from "@/lib/license";
 
 // Single source of truth for the provider-detail row — used by the /npi/[npi] page and the
 // public /api/npi/[npi] JSON endpoint so they can't drift.
@@ -37,6 +38,7 @@ export interface ProviderRow {
   medicare_enrolled: boolean; // in the public provider enrollment file
   medicare_opted_out: boolean; // an opt-out affidavit that hasn't ended
   medicare_order_refer: string[] | null; // programs it may order/refer for; null = not on the list
+  medicare_revalidation_due: string | null; // earliest revalidation due date CMS has set, YYYY-MM-DD
 }
 
 // Medicare status columns, shared by getProvider and getProviders so a bulk row matches a single lookup.
@@ -46,7 +48,9 @@ const MEDICARE_COLS = `
             (SELECT array_remove(ARRAY[CASE WHEN r.part_b THEN 'Part B' END, CASE WHEN r.dme THEN 'DME' END,
                     CASE WHEN r.hha THEN 'Home health' END, CASE WHEN r.pmd THEN 'Power mobility' END,
                     CASE WHEN r.hospice THEN 'Hospice' END], NULL)
-               FROM public.medicare_order_referring r WHERE r.npi = p.npi) AS medicare_order_refer`;
+               FROM public.medicare_order_referring r WHERE r.npi = p.npi) AS medicare_order_refer,
+            (SELECT to_char(min(coalesce(v.adjusted_due_date, v.due_date)), 'YYYY-MM-DD')
+               FROM public.medicare_revalidation v WHERE v.npi = p.npi) AS medicare_revalidation_due`;
 
 export async function getProvider(npi: string): Promise<ProviderRow | null> {
   if (!/^\d{10}$/.test(npi)) return null; // cheap reject before hitting the DB
@@ -94,6 +98,7 @@ export async function getProviders(npis: string[]): Promise<ProviderRow[]> {
 /** Clean, stable public JSON representation (for the API + bulk-lookup tool). */
 export function toPublicJson(p: ProviderRow) {
   const org = p.entity_type === "org";
+  const lv = p.license_number ? licenseVerification(p) : null;
   return {
     npi: p.npi,
     valid: isValidNpi(p.npi),
@@ -112,6 +117,7 @@ export function toPublicJson(p: ProviderRow) {
     specialtyGroup: p.grouping,
     licenseNumber: p.license_number,
     licenseState: p.license_state,
+    licenseVerification: lv ? { source: lv.source, url: lv.url } : null,
     practiceLocation: {
       address1: titleCase(p.practice_addr1),
       address2: titleCase(p.practice_addr2),
@@ -128,6 +134,7 @@ export function toPublicJson(p: ProviderRow) {
     medicareEnrolled: p.medicare_enrolled,
     medicareOptedOut: p.medicare_opted_out,
     medicareOrderRefer: p.medicare_order_refer ?? [],
+    medicareRevalidationDue: p.medicare_revalidation_due,
     source: "NPPES",
     url: `https://npiradar.com/npi/${p.npi}`,
   };
@@ -379,10 +386,15 @@ export interface Medicare {
   enrollments: { provider_type: string | null; state: string | null }[];
   orderRefer: { part_b: boolean; dme: boolean; hha: boolean; pmd: boolean; hospice: boolean } | null;
   optOuts: { specialty: string | null; effective_date: string | null; end_date: string | null; state: string | null; current: boolean }[];
-  asOf: { enrollment: string | null; orderReferring: string | null; optOut: string | null };
+  // One per enrollment. due = the adjusted date if CMS set one, else the due date; null = not set yet ("TBD").
+  revalidation: { state: string | null; provider_type: string | null; due: string | null }[];
+  asOf: { enrollment: string | null; orderReferring: string | null; optOut: string | null; revalidation: string | null };
 }
 
-const EMPTY_MEDICARE: Medicare = { loaded: false, enrollments: [], orderRefer: null, optOuts: [], asOf: { enrollment: null, orderReferring: null, optOut: null } };
+const EMPTY_MEDICARE: Medicare = {
+  loaded: false, enrollments: [], orderRefer: null, optOuts: [], revalidation: [],
+  asOf: { enrollment: null, orderReferring: null, optOut: null, revalidation: null },
+};
 
 // [column, label, API key]
 export const ORDER_REFER_PROGRAMS = [
@@ -393,7 +405,7 @@ export const ORDER_REFER_PROGRAMS = [
 export async function getMedicare(npi: string): Promise<Medicare> {
   if (!/^\d{10}$/.test(npi)) return EMPTY_MEDICARE;
   try {
-    const [enr, ord, opt, asOf] = await Promise.all([
+    const [enr, ord, opt, rev, asOf] = await Promise.all([
       query<Medicare["enrollments"][number]>(
         `SELECT DISTINCT provider_type, state FROM public.medicare_enrollment WHERE npi = $1 ORDER BY state, provider_type`, [npi]),
       query<NonNullable<Medicare["orderRefer"]>>(
@@ -402,15 +414,25 @@ export async function getMedicare(npi: string): Promise<Medicare> {
         `SELECT specialty, to_char(effective_date, 'YYYY-MM-DD') AS effective_date, to_char(end_date, 'YYYY-MM-DD') AS end_date,
                 state, end_date >= current_date AS current
            FROM public.medicare_opt_out WHERE npi = $1 ORDER BY end_date DESC NULLS LAST`, [npi]),
+      query<Medicare["revalidation"][number]>(
+        `SELECT DISTINCT state, provider_type, to_char(coalesce(adjusted_due_date, due_date), 'YYYY-MM-DD') AS due
+           FROM public.medicare_revalidation WHERE npi = $1 ORDER BY due NULLS LAST, state`, [npi]).catch((e) => {
+        if ((e as { code?: string }).code === "42P01") return []; // loaded after the other three
+        throw e;
+      }),
       query<{ dataset: string; at: string }>(
         `SELECT dataset, to_char(max(loaded_at), 'YYYY-MM-DD') AS at FROM public.dataset_loads
-          WHERE dataset IN ('medicare_enrollment', 'medicare_order_referring', 'medicare_opt_out') GROUP BY dataset`),
+          WHERE dataset IN ('medicare_enrollment', 'medicare_order_referring', 'medicare_opt_out', 'medicare_revalidation')
+          GROUP BY dataset`),
     ]);
     const at = (k: string) => asOf.find((a) => a.dataset === k)?.at ?? null;
     return {
       loaded: asOf.length > 0,
-      enrollments: enr, orderRefer: ord[0] ?? null, optOuts: opt,
-      asOf: { enrollment: at("medicare_enrollment"), orderReferring: at("medicare_order_referring"), optOut: at("medicare_opt_out") },
+      enrollments: enr, orderRefer: ord[0] ?? null, optOuts: opt, revalidation: rev,
+      asOf: {
+        enrollment: at("medicare_enrollment"), orderReferring: at("medicare_order_referring"),
+        optOut: at("medicare_opt_out"), revalidation: at("medicare_revalidation"),
+      },
     };
   } catch (e) {
     if ((e as { code?: string }).code === "42P01") return EMPTY_MEDICARE; // not loaded yet
@@ -431,8 +453,78 @@ export function medicareToPublicJson(m: Medicare) {
       optOutAffidavits: m.optOuts.map((o) => ({
         specialty: o.specialty, state: o.state, effective: o.effective_date, end: o.end_date, current: o.current,
       })),
+      revalidation: m.revalidation.map((r) => ({ state: r.state, providerType: r.provider_type, dueDate: r.due })), // dueDate null = not set yet
       asOf: m.asOf,
-      source: "CMS: Medicare Fee-For-Service Public Provider Enrollment, Order and Referring, Opt Out Affidavits (data.cms.gov)",
+      source: "CMS: Medicare Fee-For-Service Public Provider Enrollment, Order and Referring, Opt Out Affidavits, Revalidation Due Date List (data.cms.gov)",
+    },
+  };
+}
+
+// ── CMS Care Compare: Doctors and Clinicians (pipeline/carecompare.ts) ────────────────────────────────
+// Medicare-enrolled clinicians only. Matched by NPI.
+
+export interface CareCompare {
+  clinician: {
+    med_school: string | null; grad_year: number | null; primary_specialty: string | null;
+    secondary_specialties: string | null; telehealth: boolean; assignment: "Y" | "M" | null;
+  } | null;
+  groups: { org_pac_id: string; group_name: string | null; group_members: number | null; cities: string[] | null }[];
+  groupCount: number;
+  affiliations: { facility_type: string; ccn: string; name: string | null; city: string | null; state: string | null; overall_rating: number | null }[];
+  asOf: string | null;
+}
+
+const EMPTY_CC: CareCompare = { clinician: null, groups: [], groupCount: 0, affiliations: [], asOf: null };
+
+export async function getCareCompare(npi: string, opts: { full?: boolean } = {}): Promise<CareCompare> {
+  if (!/^\d{10}$/.test(npi)) return EMPTY_CC;
+  const limit = opts.full ? API_LIST_LIMIT : PAGE_LIST_LIMIT;
+  try {
+    const [cl, gr, af, asOf] = await Promise.all([
+      query<NonNullable<CareCompare["clinician"]>>(
+        `SELECT med_school, grad_year, primary_specialty, secondary_specialties, telehealth, assignment
+           FROM public.cc_clinicians WHERE npi = $1`, [npi]),
+      query<CareCompare["groups"][number] & { total: number }>(
+        `SELECT org_pac_id, group_name, group_members, cities, count(*) OVER ()::int AS total
+           FROM public.cc_groups WHERE npi = $1 ORDER BY group_members DESC NULLS LAST, group_name LIMIT ${limit}`, [npi]),
+      query<CareCompare["affiliations"][number]>(
+        `SELECT a.facility_type, a.ccn, h.name, h.city, h.state, h.overall_rating
+           FROM public.cc_affiliations a LEFT JOIN public.cc_hospitals h ON h.ccn = a.ccn
+          WHERE a.npi = $1 ORDER BY a.facility_type <> 'Hospital', h.name NULLS LAST, a.ccn`, [npi]),
+      query<{ at: string }>(
+        `SELECT to_char(max(loaded_at), 'YYYY-MM-DD') AS at FROM public.dataset_loads WHERE dataset = 'care_compare_clinicians'`),
+    ]);
+    return {
+      clinician: cl[0] ?? null,
+      groups: gr.map(({ total: _, ...g }) => g), groupCount: gr[0]?.total ?? 0,
+      affiliations: af, asOf: asOf[0]?.at ?? null,
+    };
+  } catch (e) {
+    if ((e as { code?: string }).code === "42P01") return EMPTY_CC; // not loaded yet
+    throw e;
+  }
+}
+
+export const ASSIGNMENT_LABELS = { Y: "Accepts Medicare assignment", M: "May accept Medicare assignment" } as const;
+
+export function careCompareToPublicJson(c: CareCompare) {
+  if (!c.clinician && c.affiliations.length === 0) return { careCompare: null };
+  const k = c.clinician;
+  return {
+    careCompare: {
+      medicalSchool: titleCase(k?.med_school ?? null),
+      graduationYear: k?.grad_year ?? null,
+      primarySpecialty: titleCase(k?.primary_specialty ?? null),
+      secondarySpecialties: k?.secondary_specialties ? k.secondary_specialties.split(",").map((s) => titleCase(s.trim())) : [],
+      telehealth: k?.telehealth ?? null,
+      medicareAssignment: k?.assignment ? ASSIGNMENT_LABELS[k.assignment] : null,
+      groups: c.groups.map((g) => ({ pacId: g.org_pac_id, name: titleCase(g.group_name), members: g.group_members, cities: g.cities ?? [] })),
+      groupCount: c.groupCount,
+      facilityAffiliations: c.affiliations.map((a) => ({
+        type: a.facility_type, ccn: a.ccn, name: titleCase(a.name), city: titleCase(a.city), state: a.state, cmsOverallRating: a.overall_rating,
+      })),
+      asOf: c.asOf,
+      source: "CMS Care Compare: Doctors and Clinicians national file, Facility Affiliation, Hospital General Information (data.cms.gov)",
     },
   };
 }

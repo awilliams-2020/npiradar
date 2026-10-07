@@ -6,8 +6,8 @@ import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
 import {
   getProvider as getProviderUncached, getProviderExtras, getProviderChanges,
-  getOigExclusions as getOigUncached, getOpenPayments as getOpUncached, getMedicare, describeChange, OTHER_NAME_TYPES,
-  ORDER_REFER_PROGRAMS, type ProviderRow, type Medicare,
+  getOigExclusions as getOigUncached, getOpenPayments as getOpUncached, getMedicare, getCareCompare, describeChange, OTHER_NAME_TYPES,
+  ORDER_REFER_PROGRAMS, ASSIGNMENT_LABELS, type ProviderRow, type Medicare, type CareCompare,
 } from "@/lib/provider";
 
 // generateMetadata and the page both need these; cache() makes it one query per render.
@@ -18,6 +18,7 @@ import { slugify, cityStateSlug } from "@/lib/slug";
 import { stateName, STATE_NAMES } from "@/lib/states";
 import { Breadcrumbs, LinkChips } from "@/app/_components/facet";
 import { oigSection, oigTypeLabel, OIG_VERIFY_URL } from "@/lib/oig";
+import { licenseVerification } from "@/lib/license";
 
 // Rendered on every request, NOT cached: without generateStaticParams, Next 15 doesn't ISR a dynamic
 // route, so `revalidate` here has no effect. Deliberate since 2026-10-07: ~21 ms p50 at ~22k hits/h,
@@ -98,6 +99,9 @@ function MedicareSection({ m, individual }: { m: Medicare; individual: boolean }
   const cannot = m.orderRefer ? ORDER_REFER_PROGRAMS.filter(([k]) => !m.orderRefer![k]).map(([, l]) => l) : [];
   const types = [...new Set(m.enrollments.map((e) => titleCase(e.provider_type)).filter(Boolean))];
   const states = [...new Set(m.enrollments.map((e) => e.state).filter(Boolean))];
+  // ~90% of enrollments have no date set (CMS's lookup shows "TBD").
+  const revalDates = m.revalidation.filter((r) => r.due);
+  const today = new Date().toISOString().slice(0, 10);
   return (
     <section>
       <h2>Medicare</h2>
@@ -129,6 +133,20 @@ function MedicareSection({ m, individual }: { m: Medicare; individual: boolean }
             </dd>
           </>
         )}
+        {m.revalidation.length > 0 && (
+          <>
+            <dt>Revalidation</dt>
+            <dd>
+              {revalDates.length > 0
+                ? revalDates.map((r, i) => (
+                    <span key={i}>{i > 0 ? "; " : ""}due {r.due}{r.state ? ` (${r.state})` : ""}{r.due! < today ? ", date passed" : ""}</span>
+                  ))
+                : "No due date set by CMS yet"}
+              {revalDates.length > 0 && revalDates.length < m.revalidation.length ? <span className="sub"> · other enrollments: no date set yet</span> : null}
+              {m.asOf.revalidation && <span className="sub"> · as of {m.asOf.revalidation}</span>}
+            </dd>
+          </>
+        )}
         {individual && past.length > 0 && (
           <>
             <dt>Past opt-outs</dt>
@@ -148,16 +166,68 @@ function MedicareSection({ m, individual }: { m: Medicare; individual: boolean }
   );
 }
 
+// Background, group practices and facility affiliations from Medicare's Care Compare (Medicare-enrolled
+// clinicians only). Shown only when Care Compare lists the NPI; absence says nothing.
+function CareCompareSection({ c, npi }: { c: CareCompare; npi: string }) {
+  const k = c.clinician;
+  if (!k && c.affiliations.length === 0) return null;
+  const secondary = k?.secondary_specialties?.split(",").map((s) => titleCase(s.trim())).filter(Boolean) ?? [];
+  const facilities = c.affiliations.map((a) =>
+    a.name
+      ? `${titleCase(a.name)}${a.city ? `, ${titleCase(a.city)}, ${a.state}` : ""}${a.facility_type !== "Hospital" ? ` (${a.facility_type.toLowerCase()})` : ""}`
+      : `${a.facility_type}, CMS certification number ${a.ccn}`);
+  return (
+    <section>
+      <h2>Medicare Care Compare</h2>
+      <dl className="facts">
+        {k?.med_school && (<><dt>Medical school</dt><dd>{titleCase(k.med_school)}{k.grad_year ? `, ${k.grad_year}` : ""}</dd></>)}
+        {!k?.med_school && k?.grad_year && (<><dt>Graduated</dt><dd>{k.grad_year}</dd></>)}
+        {secondary.length > 0 && (<><dt>Secondary specialties</dt><dd>{secondary.join(", ")}</dd></>)}
+        {k?.assignment && (<><dt>Medicare assignment</dt><dd>{ASSIGNMENT_LABELS[k.assignment]}</dd></>)}
+        {k?.telehealth && (<><dt>Telehealth</dt><dd>Offers telehealth services</dd></>)}
+      </dl>
+      {c.groupCount > 0 && (
+        <>
+          <h3>Group practices ({c.groupCount})</h3>
+          <ul>
+            {c.groups.map((g) => (
+              <li key={g.org_pac_id}>
+                {titleCase(g.group_name) ?? `PAC ID ${g.org_pac_id}`}
+                <span className="sub">
+                  {g.group_members ? ` · ${g.group_members.toLocaleString()} clinicians` : ""}
+                  {g.cities?.length ? ` · ${g.cities.slice(0, 3).join("; ")}${g.cities.length > 3 ? ` +${g.cities.length - 3}` : ""}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {c.groupCount > c.groups.length && (
+            <p className="sub">Showing {c.groups.length} of {c.groupCount}. The full list is in the <a href={`/api/npi/${npi}`}>JSON API</a>.</p>
+          )}
+        </>
+      )}
+      {facilities.length > 0 && (
+        <>
+          <h3>Hospital and facility affiliations ({facilities.length})</h3>
+          <ul>{facilities.map((f, i) => <li key={i}>{f}</li>)}</ul>
+        </>
+      )}
+      <p className="sub">From CMS&apos;s Care Compare data for Medicare-enrolled clinicians{c.asOf ? `, as of ${c.asOf}` : ""}.</p>
+    </section>
+  );
+}
+
 export default async function ProviderPage({ params }: { params: Promise<{ npi: string }> }) {
   const { npi } = await params;
-  const [p, x, changes, oig, op, mc] = await Promise.all([
+  const [p, x, changes, oig, op, mc, cc] = await Promise.all([
     getProvider(npi), getProviderExtras(npi), getProviderChanges(npi), getOigExclusions(npi), getOpenPayments(npi), getMedicare(npi),
+    getCareCompare(npi),
   ]);
   if (!p) notFound();
 
   const name = fullName(p);
   const loc = locationLine(p);
   const valid = isValidNpi(p.npi);
+  const lv = p.license_number ? licenseVerification(p) : null;
   const street = [titleCase(p.practice_addr1), titleCase(p.practice_addr2)].filter(Boolean).join(", ");
 
   // Internal links into the facet graph (specialty / city / specialty×city) — the crawl + topical
@@ -221,7 +291,9 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
         {p.specialty && (<><dt>Primary specialty</dt><dd>{p.specialty}{p.classification && p.classification !== p.specialty ? ` (${p.classification})` : ""}</dd></>)}
         {p.grouping && (<><dt>Specialty group</dt><dd>{p.grouping}</dd></>)}
         {p.primary_taxonomy_code && (<><dt>Taxonomy code</dt><dd>{p.specialty_slug ? <Link href={`/specialty/${p.specialty_slug}`}>{p.primary_taxonomy_code}</Link> : p.primary_taxonomy_code}</dd></>)}
-        {p.license_number && (<><dt>License number</dt><dd>{p.license_number}{p.license_state ? ` (${p.license_state})` : ""}</dd></>)}
+        {p.license_number && (<><dt>License number</dt><dd>{p.license_number}{p.license_state ? ` (${p.license_state})` : ""}{lv && (
+          <span className="sub"> · {lv.url ? <a href={lv.url} rel="nofollow noopener">{lv.text}</a> : lv.text}</span>
+        )}</dd></>)}
         {p.sex && p.entity_type !== "org" && (<><dt>Sex</dt><dd>{p.sex === "F" ? "Female" : p.sex === "M" ? "Male" : p.sex}</dd></>)}
         {p.is_sole_proprietor != null && p.entity_type !== "org" && (<><dt>Sole proprietor</dt><dd>{p.is_sole_proprietor ? "Yes" : "No"}</dd></>)}
         {p.enumeration_date && (<><dt>Enumerated</dt><dd>{p.enumeration_date}</dd></>)}
@@ -238,6 +310,7 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
       )}
 
       <MedicareSection m={mc} individual={p.entity_type !== "org"} />
+      <CareCompareSection c={cc} npi={p.npi} />
 
       {op.latestYear !== null && (
         <section>

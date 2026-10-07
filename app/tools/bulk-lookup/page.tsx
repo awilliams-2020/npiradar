@@ -59,6 +59,10 @@ export default async function BulkLookupPage() {
             public Medicare enrollment file; opted out of Medicare now; and the programs it may order or refer for
             (Part B, DME, home health, power mobility, hospice), empty if it isn&apos;t on CMS&apos;s Order and Referring list
           </li>
+          <li>
+            <code>medicareRevalidationDue</code>: the earliest Medicare revalidation due date CMS has set for any of its
+            enrollments; empty if CMS hasn&apos;t set one (its lookup shows &ldquo;TBD&rdquo;), which is true of ~90% of enrollments
+          </li>
         </ul>
         <p>
           A <code>not_found</code> row usually means a typo. Check it with the{" "}

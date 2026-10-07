@@ -19,6 +19,7 @@ interface Row {
   medicareEnrolled?: boolean;
   medicareOptedOut?: boolean;
   medicareOrderRefer?: string[];
+  medicareRevalidationDue?: string | null;
 }
 
 /** "Opted out" / "Enrolled · orders Part B, DME" / "Not enrolled" — the Medicare cell of a row. */
@@ -34,11 +35,11 @@ function parseNpis(text: string): string[] {
 }
 
 function toCsv(rows: Row[]): string {
-  const head = ["npi", "status", "valid", "name", "entityType", "specialty", "city", "state", "deactivated", "oigExcluded", "medicareEnrolled", "medicareOptedOut", "medicareOrderRefer"];
+  const head = ["npi", "status", "valid", "name", "entityType", "specialty", "city", "state", "deactivated", "oigExcluded", "medicareEnrolled", "medicareOptedOut", "medicareOrderRefer", "medicareRevalidationDue"];
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = rows.map((r) =>
     [r.npi, r.status, r.valid ?? "", r.name ?? "", r.entityType ?? "", r.specialty ?? "", r.city ?? "", r.state ?? "", r.deactivated ?? "", r.oigExcluded ?? "",
-      r.medicareEnrolled ?? "", r.medicareOptedOut ?? "", r.medicareOrderRefer?.join("; ") ?? ""]
+      r.medicareEnrolled ?? "", r.medicareOptedOut ?? "", r.medicareOrderRefer?.join("; ") ?? "", r.medicareRevalidationDue ?? ""]
       .map(esc)
       .join(","),
   );
@@ -78,7 +79,7 @@ export function BulkLookup() {
           npi: string; valid?: boolean; name?: string; entityType?: string | null;
           specialty?: string | null; practiceLocation?: { city?: string; state?: string };
           deactivated?: boolean; oigExcluded?: boolean;
-          medicareEnrolled?: boolean; medicareOptedOut?: boolean; medicareOrderRefer?: string[];
+          medicareEnrolled?: boolean; medicareOptedOut?: boolean; medicareOrderRefer?: string[]; medicareRevalidationDue?: string | null;
         }) => [
           p.npi,
           {
@@ -86,6 +87,7 @@ export function BulkLookup() {
             specialty: p.specialty, city: p.practiceLocation?.city, state: p.practiceLocation?.state,
             deactivated: p.deactivated, oigExcluded: p.oigExcluded,
             medicareEnrolled: p.medicareEnrolled, medicareOptedOut: p.medicareOptedOut, medicareOrderRefer: p.medicareOrderRefer,
+            medicareRevalidationDue: p.medicareRevalidationDue,
           } as Row,
         ]),
       );
