@@ -25,6 +25,7 @@ import { spawnSync } from "node:child_process";
 import { parse } from "csv-parse";
 import pg from "pg";
 import { from as copyFrom } from "pg-copy-streams";
+import { refreshFacetInsights } from "./lib/insights.ts";
 
 const CATALOG = "https://openpaymentsdata.cms.gov/api/1/metastore/schemas/dataset/items?show-reference-ids=false";
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgresql://postgres:password@localhost:5433/npiradar";
@@ -156,6 +157,7 @@ async function main() {
       const oldest = Math.min(...years);
       for (const t of ["op_npi_year", "op_npi_company", "op_npi_nature"]) await client.query(`DELETE FROM public.${t} WHERE program_year < $1`, [oldest]);
     }
+    if (changed) await refreshFacetInsights(client, "op"); // city pages' payment totals and top recipients
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     throw e;

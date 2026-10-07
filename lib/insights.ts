@@ -114,32 +114,22 @@ export interface FacetInsights {
   excluded: number; // active providers in the facet on the OIG list
 }
 
-/** Payments + exclusions for the active providers of one city (optionally one specialty in it). Uses
- *  the same filter as providersByCity / providersBySpecialtyCity, so it covers exactly the listed set. */
-export function facetInsights(state: string, rawCities: string[], taxonomyCodes?: string[]): Promise<FacetInsights | null> {
+/** Payments + exclusions for the active providers of one city, or one specialty in it. Read from
+ *  mv_facet_insights (pipeline/facets.sql §5), which is precomputed per facet: computing it live joined
+ *  every provider in the facet to op_npi_year (~1-1.5 s for a large city). A facet with no row has no
+ *  paid or excluded provider; the year comes from any row. Null if the view isn't built yet. */
+export function facetInsights(state: string, citySlug: string, specialtySlug = ""): Promise<FacetInsights | null> {
   return orNull(async () => {
-    const codeFilter = taxonomyCodes ? "AND p.primary_taxonomy_code = ANY($3)" : "";
-    const params: unknown[] = taxonomyCodes ? [state, rawCities, taxonomyCodes] : [state, rawCities];
-    const facet = `SELECT p.npi FROM providers p
-      WHERE p.practice_state = $1 AND p.practice_city = ANY($2) ${codeFilter} AND p.deactivation_date IS NULL`;
-    const yr = `(SELECT max(program_year) FROM public.op_npi_year)`;
-    const [agg, top] = await Promise.all([
-      query<{ year: number | null; paid: number; total_usd: string | null; excluded: number }>(
-        `WITH f AS (${facet})
-         SELECT ${yr} AS year,
-                (SELECT count(*)::int FROM public.op_npi_year o JOIN f ON f.npi = o.npi WHERE o.program_year = ${yr}) AS paid,
-                (SELECT sum(o.total_usd)::text FROM public.op_npi_year o JOIN f ON f.npi = o.npi WHERE o.program_year = ${yr}) AS total_usd,
-                (SELECT count(DISTINCT e.npi)::int FROM public.oig_exclusions e JOIN f ON f.npi = e.npi) AS excluded`, params),
-      query<RankedProvider>(
-        `WITH f AS (${facet})
-         SELECT o.npi, ${NAME_SQL} AS name, t.display_name AS specialty, p.practice_city AS city,
-                p.practice_state AS state, o.total_usd::text AS total_usd
-           FROM public.op_npi_year o JOIN f ON f.npi = o.npi JOIN providers p ON p.npi = o.npi
-           LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
-          WHERE o.program_year = ${yr} ORDER BY o.total_usd DESC LIMIT 5`, params),
-    ]);
-    const a = agg[0];
-    return { year: a.year, paid: a.paid, totalUsd: a.total_usd ?? "0", topRecipients: top, excluded: a.excluded };
+    const r = await query<{ year: number | null; paid: number | null; total_usd: string | null; excluded: number | null; top: RankedProvider[] | null }>(
+      `SELECT y.year, f.paid, f.total_usd::text AS total_usd, f.excluded, f.top
+         FROM (SELECT year FROM mv_facet_insights LIMIT 1) y
+         LEFT JOIN mv_facet_insights f ON f.state = $1 AND f.city_slug = $2 AND f.specialty_slug = $3`,
+      [state, citySlug, specialtySlug]);
+    if (r.length === 0) return null; // view empty: nothing loaded
+    const a = r[0];
+    // The view's top list carries no city/state (the page already names the place).
+    const top = (a.top ?? []).map((t) => ({ ...t, city: null, state }));
+    return { year: a.year, paid: a.paid ?? 0, totalUsd: a.total_usd ?? "0", topRecipients: top, excluded: a.excluded ?? 0 };
   });
 }
 

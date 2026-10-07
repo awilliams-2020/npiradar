@@ -4,7 +4,7 @@ import { usd } from "@/lib/insights";
 import { titleCase } from "@/lib/format";
 
 // Payments + exclusions for the providers listed on a city or specialty×city page. Rendered only on
-// index-eligible pages (the query is ~1.5s on the largest city; thin pages don't need it).
+// index-eligible pages (read from the precomputed mv_facet_insights; thin pages don't need it).
 export function FacetInsightsSection({ x, label }: { x: FacetInsights; label: string }) {
   if (!x.year && x.excluded === 0) return null;
   return (

@@ -53,7 +53,7 @@ export default async function CityPage({ params, searchParams }: { params: Param
     providersByCity(state, c.raw_cities, PAGE_SIZE, offset),
     page === 1 ? specialtiesForCity(state, city, 30) : Promise.resolve([]),
     page === 1 ? topCitiesInState(state, city, 24) : Promise.resolve([]),
-    page === 1 && indexable ? facetInsights(state, c.raw_cities) : Promise.resolve(null),
+    page === 1 && indexable ? facetInsights(state, city) : Promise.resolve(null),
   ]);
 
   const label = `${titleCase(c.city_name)}, ${c.state}`;

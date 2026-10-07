@@ -38,6 +38,15 @@ SET maintenance_work_mem = '512MB';
 CREATE INDEX IF NOT EXISTS idx_providers_state_city_tax
   ON providers (practice_state, practice_city, primary_taxonomy_code)
   WHERE deactivation_date IS NULL;
+-- Name-ordered listings: city pages and specialty pages show providers ORDER BY last_name, org_name,
+-- npi. Without an index in that order Postgres reads every provider in the facet and sorts (Houston:
+-- 87k rows, ~770 ms); with it, a LATERAL per raw city / per code reads just one page (~5 ms).
+CREATE INDEX IF NOT EXISTS idx_providers_city_name
+  ON providers (practice_state, practice_city, last_name, org_name, npi)
+  WHERE deactivation_date IS NULL;
+CREATE INDEX IF NOT EXISTS idx_providers_tax_name
+  ON providers (primary_taxonomy_code, last_name, org_name, npi)
+  WHERE deactivation_date IS NULL;
 CREATE INDEX IF NOT EXISTS idx_providers_lastname
   ON providers (last_name text_pattern_ops)
   WHERE deactivation_date IS NULL AND entity_type = 'individual';
@@ -110,6 +119,62 @@ CREATE MATERIALIZED VIEW mv_provider_sitemap_pages AS
     FROM ranked
    GROUP BY page;
 CREATE UNIQUE INDEX ON mv_provider_sitemap_pages (page);
+
+-- 4b. Whole-table totals, read by the home page, llms.txt and the sitemap's data-version stamp. Each was a
+--     count(*) / max() over ~9.8M rows (~0.5 s) run on the first request after every restart.
+DROP MATERIALIZED VIEW IF EXISTS mv_provider_totals;
+CREATE MATERIALIZED VIEW mv_provider_totals AS
+  SELECT count(*) AS providers,
+         count(*) FILTER (WHERE deactivation_date IS NULL) AS active,
+         max(last_update_date) AS last_update
+    FROM providers;
+
+-- 5. Payments + exclusions per city and per specialty×city (the "Industry payments and exclusions"
+--    block). Computed live it joined every provider in the facet to op_npi_year on each request:
+--    ~1-1.5 s for a large city. Precomputed here (~20 s, ~100 MB) and read as one row. specialty_slug
+--    '' = the whole city. Only facets with a paid or excluded provider have a row; no row = zero.
+--    Rebuilt with each NPPES load (here) and REFRESHed by openpayments.ts / leie.ts after their loads
+--    (pipeline/lib/insights.ts). Skipped if those tables don't exist yet (fresh database); the pages
+--    then omit the block.
+DROP MATERIALIZED VIEW IF EXISTS mv_facet_insights;
+DO $do$
+BEGIN
+  IF to_regclass('public.op_npi_year') IS NULL OR to_regclass('public.oig_exclusions') IS NULL THEN
+    RAISE NOTICE 'mv_facet_insights skipped: Open Payments / OIG tables not loaded yet';
+    RETURN;
+  END IF;
+  EXECUTE $mv$
+CREATE MATERIALIZED VIEW mv_facet_insights AS
+WITH yr AS (SELECT max(program_year) AS y FROM public.op_npi_year),
+k AS (SELECT npi FROM public.op_npi_year WHERE program_year = (SELECT y FROM yr)
+      UNION SELECT npi FROM public.oig_exclusions),
+pv AS (
+  SELECT p.npi, p.practice_state AS state,
+         trim(both '-' FROM regexp_replace(lower(p.practice_city), '[^a-z0-9]+', '-', 'g')) AS city_slug,
+         t.slug AS specialty_slug, t.display_name AS specialty,
+         COALESCE(p.org_name, concat_ws(' ', p.first_name, p.last_name)) AS name,
+         o.total_usd,
+         EXISTS (SELECT 1 FROM public.oig_exclusions e WHERE e.npi = p.npi) AS excluded
+    FROM k JOIN providers p ON p.npi = k.npi
+    LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
+    LEFT JOIN public.op_npi_year o ON o.npi = p.npi AND o.program_year = (SELECT y FROM yr)
+   WHERE p.deactivation_date IS NULL AND p.practice_city IS NOT NULL
+     AND p.practice_state IN (SELECT code FROM us_states)),
+lv AS (  -- each provider counts once at city level ('') and once under its specialty
+  SELECT *, '' AS facet FROM pv
+  UNION ALL SELECT *, specialty_slug FROM pv WHERE specialty_slug IS NOT NULL),
+ranked AS (
+  SELECT *, row_number() OVER (PARTITION BY state, city_slug, facet ORDER BY total_usd DESC NULLS LAST, npi) AS rk FROM lv)
+SELECT state, city_slug, facet AS specialty_slug, (SELECT y FROM yr) AS year,
+       count(total_usd)::int AS paid,
+       coalesce(sum(total_usd), 0)::numeric(16,2) AS total_usd,
+       count(*) FILTER (WHERE excluded)::int AS excluded,
+       coalesce(jsonb_agg(jsonb_build_object('npi', npi, 'name', name, 'specialty', specialty, 'total_usd', total_usd::text)
+                          ORDER BY rk) FILTER (WHERE rk <= 5 AND total_usd IS NOT NULL), '[]') AS top
+  FROM ranked GROUP BY state, city_slug, facet$mv$;
+  EXECUTE 'CREATE UNIQUE INDEX ON mv_facet_insights (state, city_slug, specialty_slug)';
+END
+$do$;
 
 ANALYZE taxonomy;
 ANALYZE mv_specialty_counts;

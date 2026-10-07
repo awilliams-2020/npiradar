@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import {
   getSpecialtyCity, getCity, providersBySpecialtyCity,
   otherSpecialtiesInCity, sameSpecialtyOtherCities,
-  PAGE_SIZE, MAX_INDEXED_PAGE, INDEXABLE_MIN, specialtyCodes,
+  PAGE_SIZE, MAX_INDEXED_PAGE, INDEXABLE_MIN,
 } from "@/lib/facets";
 import { facetInsights } from "@/lib/insights";
 import { FacetInsightsSection } from "@/app/_components/facet-insights";
@@ -63,7 +63,7 @@ export default async function SpecialtyCityPage({ params, searchParams }: { para
     page === 1 ? otherSpecialtiesInCity(state, citySlug, slug, 24) : Promise.resolve([]),
     page === 1 ? sameSpecialtyOtherCities(slug, state, citySlug, 24) : Promise.resolve([]),
     page === 1 && indexable
-      ? specialtyCodes(slug).then((codes) => (codes.length ? facetInsights(state, city.raw_cities, codes) : null))
+      ? facetInsights(state, citySlug, slug)
       : Promise.resolve(null),
   ]);
 

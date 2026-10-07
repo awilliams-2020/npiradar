@@ -15,8 +15,8 @@ export const CITY_INDEXABLE_MIN = 250; // a city page is indexed only at/above t
 export const MAX_INDEXED_PAGE = 10; // paginate beyond this → noindex (avoid deep-pagination index bloat)
 
 // Data version = the latest NPPES "last update" date. It only advances with the monthly load, so it
-// doubles as a sitemap Last-Modified / lastmod stamp. Cached per-instance for a day so the one uncached
-// max() over ~9M rows runs at most once per instance per day (sitemap conditional requests are cheap).
+// doubles as a sitemap Last-Modified / lastmod stamp. Read from mv_provider_totals (the max() over ~9.8M
+// rows is precomputed per load); cached per-instance for a day.
 // Floor for that stamp: the date the sitemap inclusion rules last changed. Without it a rules change (e.g.
 // the thresholds above) is invisible to Google — its If-Modified-Since still matches the data version, so
 // every sitemap answers 304 and the new, smaller set is never fetched. Bump whenever the rules change.
@@ -29,7 +29,7 @@ export async function dataVersion(): Promise<string> {
   let date = new Date().toISOString().slice(0, 10); // fail-open: today's date → re-crawl, never serve stale
   try {
     const rows = await query<{ c: string | null }>(
-      `SELECT to_char(max(last_update_date), 'YYYY-MM-DD') AS c FROM providers`,
+      `SELECT to_char(last_update, 'YYYY-MM-DD') AS c FROM mv_provider_totals`, // facets.sql §4b
     );
     if (rows[0]?.c) date = rows[0].c;
   } catch {
@@ -79,6 +79,26 @@ const LIST_COLS = `p.npi, p.entity_type, p.org_name, p.first_name, p.middle_name
   p.credential, p.practice_city, p.practice_state, t.display_name AS specialty`;
 const LIST_ORDER = `ORDER BY p.last_name NULLS LAST, p.org_name NULLS LAST, p.npi`;
 
+/** One page of a name-ordered listing over several keys (a city's raw spellings, a slug's codes). A plain
+ *  `col = ANY($keys) ORDER BY name` can't walk an index in name order across keys, so Postgres reads and
+ *  sorts the whole facet (Houston: 87k rows, ~770 ms). Instead: per key, an index-ordered scan of just
+ *  offset+limit rows (idx_providers_city_name / idx_providers_tax_name), then merge. ~5 ms.
+ *  `where` uses k.key for the per-key column; $1 is the key array, then `params`. */
+function listByKeys(where: string, params: unknown[], keys: string[], limit: number, offset: number) {
+  const n = params.length;
+  return query<ProviderListItem>(
+    `SELECT x.npi, x.entity_type, x.org_name, x.first_name, x.middle_name, x.last_name,
+            x.credential, x.practice_city, x.practice_state, t.display_name AS specialty
+       FROM unnest($1::text[]) k(key)
+       CROSS JOIN LATERAL (
+         SELECT p.* FROM providers p WHERE ${where} AND p.deactivation_date IS NULL
+         ${LIST_ORDER} LIMIT $${n + 2}) x
+       LEFT JOIN taxonomy t ON t.code = x.primary_taxonomy_code
+      ORDER BY x.last_name NULLS LAST, x.org_name NULLS LAST, x.npi LIMIT $${n + 3} OFFSET $${n + 4}`,
+    [keys, ...params, offset + limit, limit, offset],
+  );
+}
+
 // ---- specialty ---------------------------------------------------------------
 export interface Specialty {
   slug: string; display_name: string; grouping: string | null; n: number;
@@ -121,12 +141,7 @@ export async function specialtyCodes(slug: string): Promise<string[]> {
 export async function providersBySpecialty(slug: string, limit: number, offset: number): Promise<ProviderListItem[]> {
   const codes = await specialtyCodes(slug);
   if (codes.length === 0) return [];
-  return query<ProviderListItem>(
-    `SELECT ${LIST_COLS} FROM providers p LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
-      WHERE p.primary_taxonomy_code = ANY($1) AND p.deactivation_date IS NULL
-      ${LIST_ORDER} LIMIT $2 OFFSET $3`,
-    [codes, limit, offset],
-  );
+  return listByKeys(`p.primary_taxonomy_code = k.key`, [], codes, limit, offset);
 }
 
 // ---- city --------------------------------------------------------------------
@@ -142,12 +157,7 @@ export async function getCity(state: string, citySlug: string): Promise<City | n
 }
 
 export async function providersByCity(state: string, rawCities: string[], limit: number, offset: number): Promise<ProviderListItem[]> {
-  return query<ProviderListItem>(
-    `SELECT ${LIST_COLS} FROM providers p LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code
-      WHERE p.practice_state = $1 AND p.practice_city = ANY($2) AND p.deactivation_date IS NULL
-      ${LIST_ORDER} LIMIT $3 OFFSET $4`,
-    [state, rawCities, limit, offset],
-  );
+  return listByKeys(`p.practice_state = $2 AND p.practice_city = k.key`, [state], rawCities, limit, offset);
 }
 
 // ---- specialty × city (money page) -------------------------------------------

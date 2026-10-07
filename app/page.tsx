@@ -19,17 +19,15 @@ export const metadata: Metadata = {
 
 type Stats = { providers: string; active: string };
 
-// Simple in-process TTL cache so the count(*) (~0.5s on 9.5M rows) runs at most once a day per
-// instance — no dependency on Next's on-disk data cache.
+// Totals come precomputed from mv_provider_totals (pipeline/facets.sql §4b; a count(*) over 9.8M rows took
+// ~0.5 s). Still cached in-process for a day — the read is cheap, the cache just costs nothing.
 let cache: { value: Stats | null; at: number } = { value: null, at: 0 };
 const DAY = 86_400_000;
 
 async function getStats(): Promise<Stats | null> {
   if (cache.value && Date.now() - cache.at < DAY) return cache.value;
   const rows = await query<Stats>(
-    `SELECT count(*)::text AS providers,
-            count(*) FILTER (WHERE deactivation_date IS NULL)::text AS active
-     FROM providers`,
+    `SELECT providers::text AS providers, active::text AS active FROM mv_provider_totals`,
   );
   const value = rows[0] ?? null;
   // Never memoize an empty/zero count for a day: during a reload swap or a transient DB blip the

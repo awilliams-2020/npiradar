@@ -5,6 +5,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Slow city, specialty and home pages (2026-10-07)
+
+**Why:** these pages render per request, and three queries scaled with the size of the facet. Houston's
+city page took 1.2-1.3 s; specialty pages and big specialty×city pages ~0.45 s.
+- Listing: `col = ANY(keys) ORDER BY last_name …` read and sorted every provider in the facet (Houston:
+  87k rows, 773 ms) because no index matched the sort.
+- City "Industry payments and exclusions": joined every provider in the facet to `op_npi_year` on each
+  request, twice (~1-1.5 s for a large city).
+
+**What changed:**
+- `facets.sql`: `idx_providers_city_name` (state, city, last_name, org_name, npi) and `idx_providers_tax_name`
+  (taxonomy, last_name, org_name, npi), both partial on active rows (~600 MB each). `lib/facets.ts`
+  `listByKeys` scans each raw city / code in index order for just offset+limit rows and merges: 773 → 5 ms.
+- `facets.sql` §5: `mv_facet_insights`, one row per city and per specialty×city with a paid or excluded
+  provider (paid, total, excluded, top 5 as JSON). ~20 s to build, ~100 MB, 0.5 ms to read. Rebuilt with
+  each NPPES load; `openpayments.ts` and `leie.ts` refresh it (CONCURRENTLY) after a load that changed
+  data (`pipeline/lib/insights.ts`). Skipped on a database without those tables.
+- Home page, `llms.txt` and the sitemap's data-version stamp each ran a count(*) / max() over ~9.8M rows
+  (~0.5 s) on the first request after every restart; the home page's p99 was 682 ms. Now one precomputed
+  row, `mv_provider_totals` (`facets.sql` §4b): cold home 138 ms, cold `sitemap.xml` 81 ms.
+- Built on the live schema by hand. Measured in the container: Houston 1,229 → 80 ms, Stamford 435 → 35 ms,
+  `/specialty/behavior-technician` 469 → 46 ms, family medicine in Houston 470 → 49 ms. Rendered text is
+  identical before and after on all 7 sampled pages (lists, page 10, insights).
+
 ### Fixed — Docs claimed provider pages were ISR-cached for 30 days; they never were (2026-10-07)
 
 Provider, specialty and city pages (and their OG images) set `revalidate` but have no

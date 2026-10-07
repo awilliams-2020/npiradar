@@ -99,8 +99,10 @@ effect, and it now stays off on purpose:
 - Provider, specialty, specialty×city, state and city pages, and their OG images, **render on every request**.
   They set `revalidate`, but none defines `generateStaticParams`, and Next 15 doesn't ISR a dynamic route
   without one, so the setting does nothing. Responses carry `cache-control: no-store`.
-- Measured 2026-10-07: provider pages ~21 ms p50 / 64 ms p99 at ~22k hits/h (mostly crawlers); city pages
-  ~460 ms; OG cards ~110 ms. Caching ~9M provider pages would write each one to disk as it's crawled
+- Measured 2026-10-07: provider pages ~21 ms p50 / 64 ms p99 at ~22k hits/h (mostly crawlers); city and
+  specialty pages 30-130 ms after the name-ordered indexes + `mv_facet_insights` (were 0.4-1.3 s); OG cards ~110 ms.
+  Uncached rendering only works while every query is index-bound: a listing must use an index in its
+  ORDER BY (`listByKeys` in `lib/facets.ts`), and per-facet aggregates must be precomputed (`facets.sql` §5). Caching ~9M provider pages would write each one to disk as it's crawled
   (tens of KB of HTML + RSC apiece), against 305 GB free, to save ~20 ms.
 - So data is always live: a load is visible on the next request, with **no purge needed**. `/api/revalidate`
   only refreshes the genuinely static pages (`/about`, `/nppes`, the tools), which revalidate daily anyway.

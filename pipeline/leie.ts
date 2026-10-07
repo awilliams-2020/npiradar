@@ -17,6 +17,7 @@ import crypto from "node:crypto";
 import { parse } from "csv-parse/sync";
 import pg from "pg";
 import { PROVIDER_CHANGES_DDL } from "./lib/changes.ts";
+import { refreshFacetInsights } from "./lib/insights.ts";
 
 const LEIE_URL = "https://oig.hhs.gov/exclusions/downloadables/UPDATED.csv";
 const MIN_ROWS = 50_000; // the full list is ~84k rows; anything far smaller is a truncated or error download
@@ -94,6 +95,8 @@ async function main() {
     await client.query("COMMIT");
     console.log(`leie: loaded ${rows.length} NPI rows of ${all.length} (${sha.slice(0, 12)})` +
       (firstLoad ? " — first load, no history recorded" : `; +${added} excluded, -${removed} reinstated`));
+
+    if (firstLoad || added || removed) await refreshFacetInsights(client, "leie"); // city pages' excluded counts
 
     // Provider pages render per request and show the flags at once; this refreshes the cached static pages.
     const secret = process.env.REFRESH_SECRET, app = process.env.APP_INTERNAL_URL;

@@ -21,7 +21,7 @@ async function snapshot(): Promise<Snapshot> {
   const empty: Snapshot = { providers: null, specialties: [], cities: [] };
   try {
     const [countRows, specs, cities] = await Promise.all([
-      query<{ providers: string }>(`SELECT count(*)::text AS providers FROM providers`),
+      query<{ providers: string }>(`SELECT providers::text AS providers FROM mv_provider_totals`), // facets.sql §4b
       topSpecialties(12),
       topCities(12),
     ]);
