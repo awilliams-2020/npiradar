@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import {
   getSpecialtyCity, getCity, providersBySpecialtyCity,
   otherSpecialtiesInCity, sameSpecialtyOtherCities,
-  PAGE_SIZE, MAX_INDEXED_PAGE, INDEXABLE_MIN,
+  PAGE_SIZE, MAX_INDEXED_PAGE, INDEXABLE_MIN, specialtyCodes,
 } from "@/lib/facets";
+import { facetInsights } from "@/lib/insights";
+import { FacetInsightsSection } from "@/app/_components/facet-insights";
 import { parseCityState } from "@/lib/slug";
 import { titleCase } from "@/lib/format";
 import { stateName } from "@/lib/states";
@@ -55,10 +57,14 @@ export default async function SpecialtyCityPage({ params, searchParams }: { para
   if (!sc || !city) notFound();
 
   const offset = (page - 1) * PAGE_SIZE;
-  const [providers, otherSpecs, otherCities] = await Promise.all([
+  const indexable = sc.n >= INDEXABLE_MIN; // stats only where they can earn search traffic
+  const [providers, otherSpecs, otherCities, insights] = await Promise.all([
     providersBySpecialtyCity(state, city.raw_cities, slug, PAGE_SIZE, offset),
     page === 1 ? otherSpecialtiesInCity(state, citySlug, slug, 24) : Promise.resolve([]),
     page === 1 ? sameSpecialtyOtherCities(slug, state, citySlug, 24) : Promise.resolve([]),
+    page === 1 && indexable
+      ? specialtyCodes(slug).then((codes) => (codes.length ? facetInsights(state, city.raw_cities, codes) : null))
+      : Promise.resolve(null),
   ]);
 
   const cityLabel = `${titleCase(sc.city_name)}, ${sc.state}`;
@@ -81,6 +87,7 @@ export default async function SpecialtyCityPage({ params, searchParams }: { para
       </p>
       <ProviderList items={providers} offset={offset} />
       <Pager basePath={base} page={page} hasNext={providers.length === PAGE_SIZE} />
+      {insights && <FacetInsightsSection x={insights} label={`${sc.specialty_name} providers in ${titleCase(sc.city_name)}`} />}
       <LinkChips
         title={`Other specialties in ${titleCase(sc.city_name)}`}
         links={otherSpecs.map((o) => ({ href: `/specialty/${o.slug}/${citystate}`, label: o.name, n: o.n }))}

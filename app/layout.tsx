@@ -38,9 +38,29 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <main className="container">{children}</main>
         <footer className="site">
           <div className="container">
+            <nav className="footer-links" aria-label="Footer">
+              <div>
+                <strong>Look up</strong>
+                <Link href="/search">Search providers</Link>
+                <Link href="/specialty">Specialties</Link>
+                <Link href="/tools/bulk-lookup">Bulk NPI lookup</Link>
+                <Link href="/tools/npi-validator">NPI validator</Link>
+              </div>
+              <div>
+                <strong>Check</strong>
+                <Link href="/oig-exclusion-check">OIG exclusion check</Link>
+                <Link href="/open-payments">Open Payments lookup</Link>
+              </div>
+              <div>
+                <strong>Learn</strong>
+                <Link href="/nppes">NPPES and the NPI Registry</Link>
+                <Link href="/npi-api">Free NPI API</Link>
+                <Link href="/about">About &amp; contact</Link>
+              </div>
+            </nav>
             <p>
               Data: {await dataVintage()}, a public-domain dataset from CMS. NPIRadar is not affiliated with
-              or endorsed by CMS. <Link href="/about">About &amp; contact</Link>
+              or endorsed by CMS.
             </p>
           </div>
         </footer>

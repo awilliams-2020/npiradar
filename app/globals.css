@@ -34,6 +34,10 @@ header.site nav { display: flex; gap: 20px; }
 }
 footer.site { border-top: 1px solid var(--line); margin-top: 48px; color: var(--muted); font-size: 13px; }
 footer.site .container { padding-top: 20px; padding-bottom: 32px; }
+.footer-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 24px; margin-bottom: 20px; }
+.footer-links div { display: flex; flex-direction: column; gap: 6px; }
+.footer-links strong { color: var(--fg, inherit); font-size: 13px; }
+@media (max-width: 560px) { .footer-links { grid-template-columns: 1fr 1fr; } }
 
 h1 { font-size: 26px; margin: 24px 0 4px; }
 .sub { color: var(--muted); margin: 0 0 20px; }

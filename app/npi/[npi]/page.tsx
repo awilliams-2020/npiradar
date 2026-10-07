@@ -1,8 +1,18 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
-import { getProvider, getProviderExtras, getProviderChanges, getOigExclusions, getOpenPayments, describeChange, OTHER_NAME_TYPES, type ProviderRow } from "@/lib/provider";
+import {
+  getProvider as getProviderUncached, getProviderExtras, getProviderChanges,
+  getOigExclusions as getOigUncached, getOpenPayments as getOpUncached, describeChange, OTHER_NAME_TYPES, type ProviderRow,
+} from "@/lib/provider";
+
+// generateMetadata and the page both need these; cache() makes it one query per render.
+const getProvider = cache(getProviderUncached);
+const getOigExclusions = cache(getOigUncached);
+const getOpenPayments = cache(getOpUncached);
 import { slugify, cityStateSlug } from "@/lib/slug";
 import { stateName, STATE_NAMES } from "@/lib/states";
 import { Breadcrumbs, LinkChips } from "@/app/_components/facet";
@@ -10,6 +20,8 @@ import { oigSection, oigTypeLabel, OIG_VERIFY_URL } from "@/lib/oig";
 
 export const revalidate = 2592000; // 30d — matches the monthly NPPES refresh cadence
 export const dynamicParams = true; // render any NPI on first request, then cache (ISR at 8M scale)
+
+const usdWhole = (s: string) => Number(s).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 const usd = (s: string) => Number(s).toLocaleString("en-US", { style: "currency", currency: "USD" });
 
@@ -22,15 +34,22 @@ function locationLine(p: ProviderRow): string {
 
 export async function generateMetadata({ params }: { params: Promise<{ npi: string }> }): Promise<Metadata> {
   const { npi } = await params;
-  const p = await getProvider(npi);
+  const [p, oig, op] = await Promise.all([getProvider(npi), getOigExclusions(npi), getOpenPayments(npi)]);
   if (!p) return { title: `Provider not found — NPIRadar` };
   const name = fullName(p);
   const loc = locationLine(p);
+  const paid = op.years[0];
+  // Lead the description with the facts CMS's registry doesn't show: an exclusion, then industry payments.
+  const facts = [
+    oig.length > 0 ? "On the HHS OIG exclusion list." : null,
+    paid ? `Received ${usdWhole(paid.total_usd)} from ${paid.companies} drug and device ${paid.companies === 1 ? "company" : "companies"} in ${paid.program_year} (Open Payments).` : null,
+  ].filter(Boolean).join(" ");
   return {
-    title: `${name}${p.credential ? `, ${p.credential}` : ""} — NPI ${p.npi}`,
+    title: `${name}${p.credential ? `, ${p.credential}` : ""} — NPI ${p.npi}${paid ? " · Open Payments" : ""}`,
     description:
       `${name}${p.specialty ? `, ${p.specialty}` : ""}${loc ? ` in ${loc}` : ""}. ` +
-      `Look up NPI ${p.npi} for practice location, taxonomy, credentials, and other NPPES registry details.`,
+      (facts ? `${facts} ` : "") +
+      `NPI ${p.npi}: practice location, specialty, license and registry history.`,
     alternates: { canonical: `/npi/${p.npi}` },
     // Deactivated NPIs are kept reachable but excluded from the index (anti-thin-content).
     robots: p.deactivation_date ? { index: false, follow: true } : undefined,
@@ -125,7 +144,8 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
             </span>
           ))}
           . Matched by NPI to OIG&apos;s list{oig[0].loaded_at ? ` as of ${oig[0].loaded_at}` : ""}. Confirm at{" "}
-          <a href={OIG_VERIFY_URL} rel="nofollow noopener">exclusions.oig.hhs.gov</a> before relying on it.
+          <a href={OIG_VERIFY_URL} rel="nofollow noopener">exclusions.oig.hhs.gov</a> before relying on it. To check
+          a list of NPIs at once, use the <Link href="/oig-exclusion-check">OIG exclusion check</Link>.
         </div>
       )}
 
@@ -156,7 +176,7 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
           <h2>Payments from drug and device companies</h2>
           <p className="sub">
             General payments reported to CMS Open Payments, as published (disputed payments included).
-            Reporting a payment does not imply wrongdoing.
+            Reporting a payment does not imply wrongdoing. <Link href="/open-payments">About Open Payments</Link>.
           </p>
           <table className="bulk">
             <thead><tr><th>Year</th><th>Total</th><th>Payments</th><th>Companies</th></tr></thead>

@@ -12,6 +12,8 @@ export function GET() {
     { loc: "/nppes" },
     { loc: "/npi-api" },
     { loc: "/about" },
+    { loc: "/oig-exclusion-check" },
+    { loc: "/open-payments" },
   ];
   return xmlResponse(urlsetXml(urls));
 }

@@ -8,6 +8,8 @@ import { cityStateSlug } from "@/lib/slug";
 import { titleCase } from "@/lib/format";
 import { stateName } from "@/lib/states";
 import { Breadcrumbs, ProviderList, Pager, LinkChips, cityLinks } from "@/app/_components/facet";
+import { FacetInsightsSection } from "@/app/_components/facet-insights";
+import { facetInsights } from "@/lib/insights";
 
 export const revalidate = 2592000;
 export const dynamicParams = true;
@@ -46,10 +48,12 @@ export default async function CityPage({ params, searchParams }: { params: Param
   if (!c) notFound();
 
   const offset = (page - 1) * PAGE_SIZE;
-  const [providers, specs, otherCities] = await Promise.all([
+  const indexable = c.n >= CITY_INDEXABLE_MIN; // stats only where they can earn search traffic
+  const [providers, specs, otherCities, insights] = await Promise.all([
     providersByCity(state, c.raw_cities, PAGE_SIZE, offset),
     page === 1 ? specialtiesForCity(state, city, 30) : Promise.resolve([]),
     page === 1 ? topCitiesInState(state, city, 24) : Promise.resolve([]),
+    page === 1 && indexable ? facetInsights(state, c.raw_cities) : Promise.resolve(null),
   ]);
 
   const label = `${titleCase(c.city_name)}, ${c.state}`;
@@ -72,6 +76,7 @@ export default async function CityPage({ params, searchParams }: { params: Param
       </p>
       <ProviderList items={providers} offset={offset} />
       <Pager basePath={base} page={page} hasNext={providers.length === PAGE_SIZE} />
+      {insights && <FacetInsightsSection x={insights} label={`providers in ${titleCase(c.city_name)}`} />}
       <LinkChips
         title={`Specialties in ${titleCase(c.city_name)}`}
         links={specs.map((s) => ({ href: `/specialty/${s.slug}/${cs}`, label: s.name, n: s.n }))}

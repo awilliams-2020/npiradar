@@ -78,6 +78,14 @@ export default async function Home() {
           <strong>NPI validator</strong>
           <p className="sub">Check a 10-digit NPI&apos;s check digit instantly — runs in your browser.</p>
         </Link>
+        <Link href="/oig-exclusion-check" className="card">
+          <strong>OIG exclusion check</strong>
+          <p className="sub">Paste up to 100 NPIs and see which are on the HHS OIG exclusion list.</p>
+        </Link>
+        <Link href="/open-payments" className="card">
+          <strong>Open Payments lookup</strong>
+          <p className="sub">What drug and device companies paid a doctor, by year and company.</p>
+        </Link>
       </section>
 
       <LinkChips title="Popular specialties" links={specialtyLinks(specialties)} />

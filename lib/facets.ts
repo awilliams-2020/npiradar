@@ -90,7 +90,7 @@ export async function getSpecialty(slug: string): Promise<Specialty | null> {
   return r[0] ? { ...r[0], n: Number(r[0].n) } : null;
 }
 
-async function specialtyCodes(slug: string): Promise<string[]> {
+export async function specialtyCodes(slug: string): Promise<string[]> {
   const r = await query<{ code: string }>(`SELECT code FROM taxonomy WHERE slug = $1`, [slug]);
   return r.map((x) => x.code);
 }
