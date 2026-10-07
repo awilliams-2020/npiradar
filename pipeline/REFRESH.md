@@ -83,8 +83,9 @@ curl -s -H "Authorization: Bearer $SECRET" https://npiradar.com/internal/status 
 - **Rollback** (if a swap shipped bad data): `BEGIN; ALTER SCHEMA live RENAME TO bad; ALTER SCHEMA old
   RENAME TO live; COMMIT;` then `docker compose ... up -d --force-recreate npiradar` (or POST
   `/api/revalidate`). `old` is the prior month, kept until the next swap.
-- **Disk:** the runner downloads to `/app/pipeline/data/monthly` (host `~/npiradar/...`). Peak ~22 GB
-  (old + new 11 GB CSVs) before step 4 deletes the old one; keep headroom.
+- **Disk:** the runner downloads to `/app/pipeline/data/monthly` (host `~/npiradar/...`). Peak ~13 GB
+  (1.1 GB zip + 11 GB of CSVs) during a run; step 4 deletes the CSVs once the load succeeds (since
+  2026-10-07), so nothing stays between runs.
 - **Rotate the secret:** change `REFRESH_SECRET` in `.env` + the cron-job.org job, then
   `docker compose -f ~/projects/npiradar/docker-compose.yml up -d` to re-inject it.
 
