@@ -161,7 +161,8 @@ Google penalizes thin/doorway directories — the #1 risk here.
     `noindex`) whose JS solves a tiny SHA-256 proof of work, sets the cookie (7 days, bound to the UA) and
     reloads. The scraper never runs JS. Result: scraper pages served went from ~500/min to 0, and npiradar CPU
     from ~35-60% of a core to ~7%. **Skips the check:** verified Googlebot/Bingbot/Applebot/DuckDuckBot and the AI search fetchers
-    (OAI-SearchBot, ChatGPT-User, Perplexity, Claude-SearchBot) *by IP* (`~/scripts/crawler-ips`), link-preview UAs, and `/robots.txt`, sitemaps, `/api/` (public
+    (OAI-SearchBot, ChatGPT-User, Perplexity, Claude-SearchBot), Meta's meta-webindexer (added 2026-09-29; it had been
+    getting ~25 challenge 503s/hour) and Amazonbot (added 2026-09-30 but **ineffective until 2026-10-07**: Amazon publishes bare IPs, jsgate's `net.ParseCIDR` silently skipped all 2,315, so Amazonbot kept getting ~1,500 challenge 503s/18h; `update.py` now writes `/32`) *by IP* (`~/scripts/crawler-ips`), link-preview UAs, and `/robots.txt`, sitemaps, `/api/` (public
     API), `/_next/static/`, OG images, `/llms.txt`. 503 rather than 403 is deliberate: if Googlebot ever
     lands on it, Google retries instead of de-indexing. **Watch:** Googlebot getting 503s in the traefik
     log means the IP list is stale; `/api/` is now the open door if the scraper looks for one.
