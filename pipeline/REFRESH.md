@@ -1,6 +1,14 @@
-# Monthly auto-refresh (cron-job.org → zero-downtime swap)
+# Monthly auto-refresh (self-scheduled check → zero-downtime swap)
 
-Automated monthly reload of the NPPES full file, triggered by an external **cron-job.org** HTTP ping.
+Automated reload of each NPPES monthly full file. **The refresh server checks CMS itself every 6 hours**
+(added 2026-10-07) and loads a release within hours of it posting. CMS posts around the second weekend,
+on no fixed day; the old monthly cron on the 1st left the data 3–7 weeks old. The external
+**cron-job.org** POST below still works as a backup trigger. Overlapping triggers are harmless: a
+trigger returns `200 up_to_date` when nothing is newer and `409` while a run is going.
+
+Each load also brings in the release's three side files (`othername`, `pl`, `endpoint`) →
+`provider_other_names`, `provider_locations`, `provider_endpoints`. They are shown on `/npi/[npi]` and
+returned by `GET /api/npi/{npi}`.
 Built 2026-05-24. See also `pipeline/README.md` (the manual pipeline) and `STATUS.md`.
 
 ## How it works
@@ -45,7 +53,7 @@ both the app and runner containers).
 - URL: `https://npiradar.com/internal/refresh`
 - Method: **POST**
 - Header: `Authorization: Bearer <REFRESH_SECRET>`  (copy from `~/projects/npiradar/.env`)
-- Schedule: monthly, a few days in (CMS posts the full file the first weekend) — e.g. **day 8, 09:00**.
+- Schedule: optional backup to the built-in 6-hourly check. It was day 1, 04:00 UTC through 2026-10.
   Firing more often is harmless: the server returns `200 up_to_date` until a newer file appears.
 - Enable cron-job.org's failure notification (it flags any non-2xx response).
 

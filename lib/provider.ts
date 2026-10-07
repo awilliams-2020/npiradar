@@ -109,3 +109,70 @@ export function toPublicJson(p: ProviderRow) {
     url: `https://npiradar.com/npi/${p.npi}`,
   };
 }
+
+// ── Side-file data: other org names, secondary practice locations, electronic endpoints ──────────
+// From the othername/pl/endpoint files in the same NPPES release (pipeline/load.ts --side). CMS's own
+// registry UI shows these poorly or not at all; they are the part of a page the copy can't just mirror.
+
+export const OTHER_NAME_TYPES: Record<string, string> = {
+  "3": "Doing business as",
+  "4": "Former legal business name",
+  "5": "Other name",
+};
+const PAGE_LIST_LIMIT = 25; // the page lists the first N and counts the rest (one NPI has 363 locations)
+const API_LIST_LIMIT = 1000; // the API returns everything (well above the largest real list)
+
+export interface ProviderExtras {
+  otherNames: { name: string; type_code: string | null }[];
+  locations: { addr1: string | null; addr2: string | null; city: string | null; state: string | null; zip: string | null; country: string | null; phone: string | null; fax: string | null }[];
+  locationCount: number;
+  endpoints: { endpoint_type: string | null; endpoint_type_desc: string | null; endpoint: string; affiliation_name: string | null; use_desc: string | null }[];
+  endpointCount: number;
+}
+
+const EMPTY_EXTRAS: ProviderExtras = { otherNames: [], locations: [], locationCount: 0, endpoints: [], endpointCount: 0 };
+
+export async function getProviderExtras(npi: string, opts: { full?: boolean } = {}): Promise<ProviderExtras> {
+  const limit = opts.full ? API_LIST_LIMIT : PAGE_LIST_LIMIT;
+  if (!/^\d{10}$/.test(npi)) return EMPTY_EXTRAS;
+  try {
+    const [names, locs, eps] = await Promise.all([
+      query<ProviderExtras["otherNames"][number]>(
+        `SELECT name, type_code FROM provider_other_names WHERE npi = $1 ORDER BY type_code, name`, [npi]),
+      query<ProviderExtras["locations"][number] & { total: number }>(
+        `SELECT addr1, addr2, city, state, zip, country, phone, fax, count(*) OVER ()::int AS total
+           FROM provider_locations WHERE npi = $1 ORDER BY state, city, addr1 LIMIT ${limit}`, [npi]),
+      query<ProviderExtras["endpoints"][number] & { total: number }>(
+        `SELECT endpoint_type, endpoint_type_desc, endpoint, affiliation_name, use_desc, count(*) OVER ()::int AS total
+           FROM provider_endpoints WHERE npi = $1 ORDER BY endpoint_type, endpoint LIMIT ${limit}`, [npi]),
+    ]);
+    return {
+      otherNames: names,
+      locations: locs.map(({ total: _, ...l }) => l),
+      locationCount: locs[0]?.total ?? 0,
+      endpoints: eps.map(({ total: _, ...e }) => e),
+      endpointCount: eps[0]?.total ?? 0,
+    };
+  } catch (e) {
+    // 42P01 = table missing: a live schema loaded before the side files existed. Show the page without them.
+    if ((e as { code?: string }).code === "42P01") return EMPTY_EXTRAS;
+    throw e;
+  }
+}
+
+/** Public JSON for the side-file data (single-NPI API only; bulk keeps the flat core row). */
+export function extrasToPublicJson(x: ProviderExtras) {
+  return {
+    otherNames: x.otherNames.map((n) => ({ name: n.name, type: OTHER_NAME_TYPES[n.type_code ?? ""] ?? null })),
+    secondaryLocations: x.locations.map((l) => ({
+      address1: titleCase(l.addr1), address2: titleCase(l.addr2), city: titleCase(l.city), state: l.state,
+      zip: formatZip(l.zip), country: l.country, phone: formatPhone(l.phone), fax: formatPhone(l.fax),
+    })),
+    secondaryLocationCount: x.locationCount,
+    endpoints: x.endpoints.map((e) => ({
+      type: e.endpoint_type, typeDescription: e.endpoint_type_desc, endpoint: e.endpoint,
+      affiliation: e.affiliation_name, use: e.use_desc,
+    })),
+    endpointCount: x.endpointCount,
+  };
+}

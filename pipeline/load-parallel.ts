@@ -3,7 +3,8 @@
  *
  * Phase 1: one `--prepare` (DDL + taxonomy).
  * Phase 2: N concurrent `--shard i/N` workers, each its own process (own core for the JS parse)
- *          and own connection + COPY stream into the shared UNLOGGED providers table.
+ *          and own connection + COPY stream into the shared UNLOGGED providers table, plus one
+ *          `--side` worker loading the othername/pl/endpoint side files.
  * Phase 3: one `--finalize` (PK + indexes + ANALYZE + verification).
  *
  * Default 4 workers — deliberately below the 12 cores, since this Postgres also serves live
@@ -47,10 +48,11 @@ async function main() {
   console.log(`[1/3] prepare`);
   await run("prepare", ["--prepare"]);
 
-  console.log(`[2/3] loading with ${workers} parallel workers`);
-  await Promise.all(
-    Array.from({ length: workers }, (_, i) => run(`shard ${i}/${workers}`, ["--shard", `${i}/${workers}`])),
-  );
+  console.log(`[2/3] loading with ${workers} parallel workers + the side files`);
+  await Promise.all([
+    ...Array.from({ length: workers }, (_, i) => run(`shard ${i}/${workers}`, ["--shard", `${i}/${workers}`])),
+    run("side", ["--side"]),
+  ]);
 
   console.log(`[3/3] finalize`);
   await run("finalize", ["--finalize"]);

@@ -84,12 +84,24 @@ main() {
   unzip -tqq "$zip" >/dev/null || { log "ERROR: corrupt download: ${zip}"; exit 1; }
 
   # The provider file is npidata_pfile_<start>-<end>.csv (NOT *_fileheader.csv, and not the
-  # othername/pl/endpoint side files).
+  # othername/pl/endpoint side files, which are extracted separately below).
   csv_in_zip="$(unzip -Z1 "$zip" | grep -E '^npidata_pfile_[0-9]+-[0-9]+\.csv$' | head -1)"
   [ -n "$csv_in_zip" ] || { log "ERROR: no npidata_pfile CSV inside ${zip}"; exit 1; }
 
   log "extracting ${csv_in_zip}…"
   unzip -o "$zip" "$csv_in_zip" -d "$DEST" 1>&2
+
+  # Side files from the same release (other org names, secondary practice locations, electronic
+  # endpoints). load.ts finds them next to the npidata CSV by its date range. Optional: a release
+  # without one just loads that table empty.
+  local range="${csv_in_zip#npidata_pfile_}"
+  for side in othername pl endpoint; do
+    if unzip -Z1 "$zip" | grep -qx "${side}_pfile_${range}"; then
+      unzip -o "$zip" "${side}_pfile_${range}" -d "$DEST" 1>&2
+    else
+      log "WARN: no ${side}_pfile_${range} in ${zip}"
+    fi
+  done
 
   log "done; removing zip to save disk"
   rm -f "$zip"

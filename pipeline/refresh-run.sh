@@ -5,7 +5,7 @@
 #   1. fetch the latest CMS monthly file (fetch-monthly.sh)
 #   2. load it into the `staging` schema and atomically swap → `live` (load-parallel.ts --schema staging --swap)
 #   3. purge the app's ISR cache (authed POST to /api/revalidate)
-#   4. clean up the previous month's CSV to reclaim disk
+#   4. clean up the previous month's CSVs to reclaim disk
 # Outcome (success/fail) is written back to public.refresh_runs(id=$RUN_ID) via refresh-state.mjs.
 #
 # Required env: RUN_ID, DATABASE_URL, REFRESH_SECRET.
@@ -38,7 +38,9 @@ curl -fsS --max-time 60 -X POST -H "Authorization: Bearer $REFRESH_SECRET" "$APP
   || echo "[refresh] WARN: revalidate call failed (data is live; pages refresh on their own 30-day cycle)" >&2
 
 echo "[refresh] (4/4) cleaning previous monthly CSVs…"
-find "$(dirname "$CSV")" -maxdepth 1 -name 'npidata_pfile_*.csv' ! -path "$CSV" -delete 2>/dev/null || true
+# Every *_pfile_* CSV not from this release (npidata + the othername/pl/endpoint side files).
+RANGE="$(basename "$CSV" | sed 's/^npidata_pfile_//')"
+find "$(dirname "$CSV")" -maxdepth 1 -name '*_pfile_*.csv' ! -name "*_pfile_${RANGE}" -delete 2>/dev/null || true
 
 state success "$RUN_ID" "loaded $(basename "$CSV")"
 echo "[refresh] run $RUN_ID done $(date -u +%FT%TZ)"

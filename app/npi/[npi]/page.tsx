@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isValidNpi } from "@/lib/npi";
 import { fullName, titleCase, formatZip, formatPhone } from "@/lib/format";
-import { getProvider, type ProviderRow } from "@/lib/provider";
+import { getProvider, getProviderExtras, OTHER_NAME_TYPES, type ProviderRow } from "@/lib/provider";
 import { slugify, cityStateSlug } from "@/lib/slug";
 import { stateName, STATE_NAMES } from "@/lib/states";
 import { Breadcrumbs, LinkChips } from "@/app/_components/facet";
@@ -59,7 +59,7 @@ function JsonLd({ p }: { p: ProviderRow }) {
 
 export default async function ProviderPage({ params }: { params: Promise<{ npi: string }> }) {
   const { npi } = await params;
-  const p = await getProvider(npi);
+  const [p, x] = await Promise.all([getProvider(npi), getProviderExtras(npi)]);
   if (!p) notFound();
 
   const name = fullName(p);
@@ -126,6 +126,53 @@ export default async function ProviderPage({ params }: { params: Promise<{ npi: 
           <div>{[loc, formatZip(p.practice_zip)].filter(Boolean).join(" ")}</div>
           {p.practice_phone && <div>{formatPhone(p.practice_phone)}</div>}
         </div>
+      )}
+
+      {x.otherNames.length > 0 && (
+        <section>
+          <h2>Other names</h2>
+          <ul>
+            {x.otherNames.map((n, i) => (
+              <li key={i}>{titleCase(n.name)}{OTHER_NAME_TYPES[n.type_code ?? ""] ? <span className="sub"> · {OTHER_NAME_TYPES[n.type_code ?? ""]}</span> : null}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {x.locationCount > 0 && (
+        <section>
+          <h2>Other practice locations ({x.locationCount})</h2>
+          <ul>
+            {x.locations.map((l, i) => (
+              <li key={i}>
+                {[titleCase(l.addr1), titleCase(l.addr2), titleCase(l.city), [l.state, formatZip(l.zip)].filter(Boolean).join(" "),
+                  l.country && l.country !== "US" ? l.country : null].filter(Boolean).join(", ")}
+                {l.phone ? <span className="sub"> · {formatPhone(l.phone)}</span> : null}
+              </li>
+            ))}
+          </ul>
+          {x.locationCount > x.locations.length && (
+            <p className="sub">Showing {x.locations.length} of {x.locationCount}. The full list is in the <a href={`/api/npi/${p.npi}`}>JSON API</a>.</p>
+          )}
+        </section>
+      )}
+
+      {x.endpointCount > 0 && (
+        <section>
+          <h2>Electronic endpoints ({x.endpointCount})</h2>
+          <p className="sub">Direct secure-messaging addresses and health-data (FHIR, CONNECT, SOAP) URLs registered for this NPI.</p>
+          <ul>
+            {x.endpoints.map((e, i) => (
+              <li key={i}>
+                <strong>{e.endpoint_type_desc ?? e.endpoint_type}</strong>: <code>{e.endpoint}</code>
+                {e.affiliation_name ? <span className="sub"> · {e.affiliation_name}</span> : null}
+              </li>
+            ))}
+          </ul>
+          {x.endpointCount > x.endpoints.length && (
+            <p className="sub">Showing {x.endpoints.length} of {x.endpointCount}. The full list is in the <a href={`/api/npi/${p.npi}`}>JSON API</a>.</p>
+          )}
+        </section>
       )}
 
       {!p.deactivation_date && related.length > 0 && (

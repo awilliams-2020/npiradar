@@ -5,6 +5,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — Real data-vintage label, 6-hourly refresh check, NPPES side files (2026-10-07)
+
+**Why:** The site said "NPPES — May 2026 release" while serving the September file. `DATA_VINTAGE` was a
+hand-bumped constant, missed for four loads, so Google and `llms.txt` readers saw a site 5 months stale.
+The refresh also ran on the 1st while CMS posts around the second weekend, so data was 3–7 weeks old.
+And every page was a strict subset of CMS's own registry: the loader discarded the three side files.
+
+**What changed:**
+- `dataVintage()` (`lib/facets.ts`) reads the last successful `refresh_runs.source_file` →
+  "NPPES — September 2026 release". Used by the footer, the homepage Dataset JSON-LD, `llms.txt`, `/nppes`,
+  `/npi-api`, `/tools/bulk-lookup`. At build (no DB) it falls back to "NPPES monthly release", so the
+  static pages now `revalidate` daily.
+- `refresh-server.ts` runs its own check every 6h (plus 60s after boot). No-op unless CMS has a newer file.
+- `fetch-monthly.sh` also extracts `othername_`, `pl_` and `endpoint_pfile_*.csv`; `load.ts --side` COPYs them
+  (in parallel with the provider shards) into `provider_other_names` (853k), `provider_locations`
+  (1.19M, 776k NPIs) and `provider_endpoints` (598k: Direct, CONNECT, SOAP, FHIR…). Indexed on npi, LOGGED.
+- `/npi/[npi]` shows Other names / Other practice locations / Electronic endpoints (first 25 of each).
+  `GET /api/npi/{npi}` adds `otherNames`, `secondaryLocations`, `endpoints` (all rows) and their counts.
+  Bulk `POST /api/npi` is unchanged.
+- Homepage Dataset `creator` `GovernmentOrganization` → `Organization` (GSC: `Invalid object type for field "creator"`).
+
 ### Changed — Index-eligibility cut: 307k → ≈10.7k submitted URLs (2026-09-24)
 
 **Why:** The 2026-09-24 search audit (`~/scripts/seo/audits/npiradar.md`) found 1 of 156 ranking pages

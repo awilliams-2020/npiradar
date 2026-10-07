@@ -11,6 +11,8 @@
  * Modes (default = all three in one process):
  *   --prepare              DDL (drop+recreate UNLOGGED tables) + load taxonomy
  *   --shard i/N            COPY only the providers whose rowIndex % N === i  (load-only)
+ *   --side                 COPY the release's side files (other names, secondary locations, endpoints),
+ *                          found next to the npidata CSV by its date range; runs alongside the shards
  *   --finalize             add PK + indexes + ANALYZE, then run verification queries
  *
  * Usage:
@@ -18,6 +20,7 @@
  *   (parallel fan-out is driven by pipeline/load-parallel.ts)
  */
 import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "csv-parse";
 import pg from "pg";
@@ -41,8 +44,10 @@ const swapSchema = flag("--swap");
 // mode resolution: any explicit mode flag disables the implicit "do everything" run
 const doPrepare = args.includes("--prepare");
 const doFinalize = args.includes("--finalize");
+const doSide = args.includes("--side");
 const shardSpec = flag("--shard");
-const explicit = doPrepare || doFinalize || shardSpec !== undefined || swapSchema !== undefined;
+const explicit = doPrepare || doFinalize || doSide || shardSpec !== undefined || swapSchema !== undefined;
+const runSide = doSide || !explicit;
 const runPrepare = doPrepare || !explicit;
 const runFinalize = doFinalize || !explicit;
 const shard = shardSpec
@@ -57,6 +62,7 @@ if (!swapSchema && (!inputPath || inputPath.startsWith("--"))) {
 const DDL = `
 DROP TABLE IF EXISTS providers CASCADE;  -- CASCADE: the facet materialized views depend on these
 DROP TABLE IF EXISTS taxonomy CASCADE;
+DROP TABLE IF EXISTS provider_other_names, provider_locations, provider_endpoints;
 
 CREATE UNLOGGED TABLE taxonomy (
   code text PRIMARY KEY, grouping text, classification text,
@@ -72,7 +78,55 @@ CREATE UNLOGGED TABLE providers (
   deactivation_date date, is_sole_proprietor boolean,
   license_number text, license_state text
 );
+
+-- Side files from the same release. Always created (empty if a file is missing) so the app's
+-- queries never hit a missing table. Indexed on npi in --finalize.
+CREATE UNLOGGED TABLE provider_other_names (npi text, name text, type_code text);
+CREATE UNLOGGED TABLE provider_locations (
+  npi text, addr1 text, addr2 text, city text, state text, zip text, country text,
+  phone text, phone_ext text, fax text
+);
+CREATE UNLOGGED TABLE provider_endpoints (
+  npi text, endpoint_type text, endpoint_type_desc text, endpoint text, affiliation text,
+  description text, affiliation_name text, use_desc text, content_desc text,
+  city text, state text
+);
 `;
+
+// Side-file → table mapping. Headers are matched after normalizing (lowercase, alphanumerics only),
+// because CMS's header text has inconsistent spacing ("Address-  Address Line 2").
+const SIDE_FILES: { prefix: string; table: string; cols: [string, string][] }[] = [
+  { prefix: "othername", table: "provider_other_names", cols: [
+    ["npi", "NPI"],
+    ["name", "Provider Other Organization Name"],
+    ["type_code", "Provider Other Organization Name Type Code"],
+  ] },
+  { prefix: "pl", table: "provider_locations", cols: [
+    ["npi", "NPI"],
+    ["addr1", "Provider Secondary Practice Location Address- Address Line 1"],
+    ["addr2", "Provider Secondary Practice Location Address- Address Line 2"],
+    ["city", "Provider Secondary Practice Location Address - City Name"],
+    ["state", "Provider Secondary Practice Location Address - State Name"],
+    ["zip", "Provider Secondary Practice Location Address - Postal Code"],
+    ["country", "Provider Secondary Practice Location Address - Country Code (If outside U.S.)"],
+    ["phone", "Provider Secondary Practice Location Address - Telephone Number"],
+    ["phone_ext", "Provider Secondary Practice Location Address - Telephone Extension"],
+    ["fax", "Provider Practice Location Address - Fax Number"],
+  ] },
+  { prefix: "endpoint", table: "provider_endpoints", cols: [
+    ["npi", "NPI"],
+    ["endpoint_type", "Endpoint Type"],
+    ["endpoint_type_desc", "Endpoint Type Description"],
+    ["endpoint", "Endpoint"],
+    ["affiliation", "Affiliation"],
+    ["description", "Endpoint Description"],
+    ["affiliation_name", "Affiliation Legal Business Name"],
+    ["use_desc", "Use Description"],
+    ["content_desc", "Content Description"],
+    ["city", "Affiliation Address City"],
+    ["state", "Affiliation Address State"],
+  ] },
+];
 
 /** Write to a COPY stream, respecting backpressure. */
 const write = (s: NodeJS.WritableStream, chunk: string): Promise<void> =>
@@ -108,6 +162,40 @@ async function loadProviders(client: pg.Client, sh: { i: number; n: number }): P
   return copied;
 }
 
+const normHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
+const escCopy = (v: string | undefined) =>
+  !v ? "\\N" : v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
+
+/** COPY each side file of this release (sibling of the npidata CSV, same date range) into its table. */
+async function loadSideFiles(client: pg.Client) {
+  await client.query("SET synchronous_commit = off");
+  const dir = path.dirname(inputPath);
+  const range = path.basename(inputPath).replace(/^npidata_pfile_/, "");
+  for (const spec of SIDE_FILES) {
+    const file = path.join(dir, `${spec.prefix}_pfile_${range}`);
+    if (!fs.existsSync(file)) { console.warn(`side: ${path.basename(file)} not found — ${spec.table} stays empty`); continue; }
+    let idx: number[] | null = null, n = 0;
+    const stream = client.query(copyFrom(`COPY ${spec.table} (${spec.cols.map((c) => c[0]).join(", ")}) FROM STDIN`));
+    const csv = fs.createReadStream(file).pipe(parse({ columns: false, skip_empty_lines: true, relax_quotes: true, bom: true }));
+    for await (const row of csv as AsyncIterable<string[]>) {
+      if (!idx) {
+        const header = row.map(normHeader);
+        idx = spec.cols.map(([, h]) => {
+          const i = header.indexOf(normHeader(h));
+          if (i < 0) throw new Error(`side: column "${h}" missing from ${path.basename(file)}`);
+          return i;
+        });
+        continue;
+      }
+      if (!row[idx[0]]) continue;
+      await write(stream, idx.map((i) => escCopy(row[i]?.trim())).join("\t") + "\n");
+      n++;
+    }
+    await finish(stream);
+    console.log(`side: ${spec.table} ← ${n.toLocaleString()} rows`);
+  }
+}
+
 async function finalize(client: pg.Client) {
   console.log("finalize: building PK + indexes (maintenance_work_mem=512MB)…");
   await client.query("SET maintenance_work_mem = '512MB'");
@@ -117,6 +205,10 @@ async function finalize(client: pg.Client) {
     CREATE INDEX idx_providers_taxonomy ON providers (primary_taxonomy_code);
     CREATE INDEX idx_providers_state_taxonomy ON providers (practice_state, primary_taxonomy_code);
     ANALYZE providers; ANALYZE taxonomy;
+    CREATE INDEX idx_other_names_npi ON provider_other_names (npi);
+    CREATE INDEX idx_locations_npi ON provider_locations (npi);
+    CREATE INDEX idx_endpoints_npi ON provider_endpoints (npi);
+    ANALYZE provider_other_names; ANALYZE provider_locations; ANALYZE provider_endpoints;
   `);
 
   // Durability: the bulk COPY ran into UNLOGGED tables (no WAL = fast load), but Postgres TRUNCATES
@@ -124,13 +216,18 @@ async function finalize(client: pg.Client) {
   // them to LOGGED now (a one-time table rewrite that writes WAL once) so the loaded data survives
   // restarts. Done before facets.sql so the facet indexes are built on an already-logged table.
   console.log("finalize: converting providers/taxonomy to LOGGED (durable across restarts)…");
-  await client.query(`ALTER TABLE providers SET LOGGED; ALTER TABLE taxonomy SET LOGGED;`);
+  await client.query(`ALTER TABLE providers SET LOGGED; ALTER TABLE taxonomy SET LOGGED;
+    ALTER TABLE provider_other_names SET LOGGED; ALTER TABLE provider_locations SET LOGGED;
+    ALTER TABLE provider_endpoints SET LOGGED;`);
 
   const q = async (label: string, sql: string) => { const r = await client.query(sql); console.log(`\n— ${label}`); console.table(r.rows); };
   await q("row counts", `
     SELECT (SELECT count(*) FROM providers) AS providers,
            (SELECT count(*) FROM providers WHERE deactivation_date IS NULL) AS active,
-           (SELECT count(*) FROM taxonomy)  AS taxonomy_codes`);
+           (SELECT count(*) FROM taxonomy)  AS taxonomy_codes,
+           (SELECT count(*) FROM provider_other_names) AS other_names,
+           (SELECT count(*) FROM provider_locations)   AS secondary_locations,
+           (SELECT count(*) FROM provider_endpoints)   AS endpoints`);
   await q("taxonomy JOIN unmatched (should be 0)", `
     SELECT count(*) FILTER (WHERE t.code IS NULL AND p.primary_taxonomy_code IS NOT NULL) AS unmatched
     FROM providers p LEFT JOIN taxonomy t ON t.code = p.primary_taxonomy_code`);
@@ -193,7 +290,7 @@ async function main() {
     return;
   }
 
-  const role = shard ? `load ${shard.i}/${shard.n}` : doPrepare && doFinalize ? "all" : doPrepare ? "prepare" : doFinalize ? "finalize" : "all";
+  const role = shard ? `load ${shard.i}/${shard.n}` : doSide && !doPrepare && !doFinalize ? "side" : doPrepare && doFinalize ? "all" : doPrepare ? "prepare" : doFinalize ? "finalize" : "all";
   console.log(`connected → ${DATABASE_URL.replace(/:[^:@/]+@/, ":***@")}  [${role}${targetSchema ? ` schema=${targetSchema}` : ""}]`);
   const t0 = Date.now();
 
@@ -214,6 +311,7 @@ async function main() {
     const secs = ((Date.now() - t0) / 1000);
     console.log(`shard ${shard.i}/${shard.n}: COPYed ${n.toLocaleString()} rows in ${secs.toFixed(1)}s (${Math.round(n / secs).toLocaleString()} rows/s)`);
   }
+  if (runSide) await loadSideFiles(client);
   if (runFinalize) await finalize(client);
 
   await client.end();
