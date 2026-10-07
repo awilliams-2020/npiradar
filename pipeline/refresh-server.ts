@@ -2,7 +2,8 @@
  * refresh-server.ts — the tiny HTTP service cron-job.org pings to trigger a monthly NPPES refresh.
  *
  * cron-job.org expects a response within ~30s, but a refresh takes ~20 min — so this NEVER does the
- * work synchronously. POST /internal/refresh validates the secret, dedupes (advisory via a
+ * work synchronously. It also runs the same check itself every 6h (see CHECK_EVERY_MS), so a release
+ * loads within hours of CMS posting it. POST /internal/refresh validates the secret, dedupes (advisory via a
  * `running` row), short-circuits when CMS has nothing newer, then spawns refresh-run.sh DETACHED and
  * returns 202 immediately. GET /internal/status reports recent runs; /internal/healthz is unauthed.
  *
@@ -92,18 +93,18 @@ function spawnJob(runId: number): string {
   return logPath;
 }
 
-async function handleRefresh(res: http.ServerResponse) {
+async function startRefresh(): Promise<{ code: number; body: Record<string, unknown> }> {
   // One refresh at a time. A `running` row older than 3h is treated as a crashed run and ignored.
   const running = await pool.query(
     `SELECT id FROM public.refresh_runs WHERE state='running' AND started_at > now() - interval '3 hours' LIMIT 1`,
   );
-  if (running.rowCount) return json(res, 409, { status: "already_running", runId: running.rows[0].id });
+  if (running.rowCount) return { code: 409, body: { status: "already_running", runId: running.rows[0].id } };
 
   let marker = "";
   try {
     marker = await resolveLatestMarker();
   } catch (e) {
-    return json(res, 502, { status: "resolve_failed", error: String(e) });
+    return { code: 502, body: { status: "resolve_failed", error: String(e) } };
   }
 
   const last = await pool.query(`SELECT source_file FROM public.refresh_runs WHERE state='success' ORDER BY id DESC LIMIT 1`);
@@ -112,13 +113,13 @@ async function handleRefresh(res: http.ServerResponse) {
   // still matches, so a pure filename check would refuse to reload and leave the site empty until CMS
   // ships a newer release. When the data is gone, reload the same file to self-heal.
   if (last.rows[0]?.source_file === marker && (await liveHasProviders())) {
-    return json(res, 200, { status: "up_to_date", file: marker });
+    return { code: 200, body: { status: "up_to_date", file: marker } };
   }
 
   const ins = await pool.query(`INSERT INTO public.refresh_runs (state, source_file) VALUES ('running', $1) RETURNING id`, [marker]);
   const runId = ins.rows[0].id as number;
   const log = spawnJob(runId);
-  return json(res, 202, { status: "started", runId, file: marker, log });
+  return { code: 202, body: { status: "started", runId, file: marker, log } };
 }
 
 const server = http.createServer((req, res) => {
@@ -136,12 +137,31 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url === "/internal/refresh" && method === "POST") {
-    handleRefresh(res).catch((e) => json(res, 500, { error: String(e) }));
+    startRefresh().then((r) => json(res, r.code, r.body)).catch((e) => json(res, 500, { error: String(e) }));
     return;
   }
   json(res, 404, { error: "not found" });
 });
 
+// Self-scheduled check. CMS posts the monthly file around the second weekend, on no fixed day, so a
+// monthly cron on the 1st left the data 3-7 weeks old (2026-10-07: the September file sat unloaded until
+// 10-01). startRefresh() is a no-op when nothing is newer, so checking every 6h costs a few ranged GETs
+// and loads each release within hours of it posting. cron-job.org's POST still works; the dedupe makes
+// overlapping triggers harmless.
+const CHECK_EVERY_MS = 6 * 3_600_000;
+async function scheduledCheck() {
+  try {
+    const r = await startRefresh();
+    if (r.code !== 200) console.log(`scheduled check: ${r.code} ${JSON.stringify(r.body)}`);
+  } catch (e) {
+    console.error("scheduled check failed:", e);
+  }
+}
+
 ensureTable()
-  .then(() => server.listen(PORT, () => console.log(`refresh-server listening on :${PORT}`)))
+  .then(() => server.listen(PORT, () => {
+    console.log(`refresh-server listening on :${PORT}`);
+    setTimeout(scheduledCheck, 60_000); // first check shortly after boot, then every 6h
+    setInterval(scheduledCheck, CHECK_EVERY_MS);
+  }))
   .catch((e) => { console.error("startup failed:", e); process.exit(1); });
