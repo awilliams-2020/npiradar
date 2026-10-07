@@ -139,7 +139,9 @@ npm install                                  # pipeline deps: csv-parse, pg, pg-
 # create the spike DB in the shared instance (NOT a new container)
 docker exec postgres psql -U postgres -c "CREATE DATABASE npiradar;"
 
-# parse (inspect + stats) then load (COPY into staging), pointed at the weekly slice:
+# parse (inspect + stats) then load (COPY into staging), pointed at the weekly slice.
+# The May 2026 weekly sample was deleted 2026-10-07; to re-run, download a current weekly zip from
+# https://download.cms.gov/nppes/NPI_Files.html and unzip it into pipeline/data/weekly/.
 npx tsx pipeline/parse.ts pipeline/data/weekly/npidata_pfile_*.csv --taxonomy pipeline/data/nucc_taxonomy_251.csv
 npx tsx pipeline/load.ts  pipeline/data/weekly/npidata_pfile_*.csv --taxonomy pipeline/data/nucc_taxonomy_251.csv
 
